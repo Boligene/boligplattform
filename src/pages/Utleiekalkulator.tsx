@@ -1,83 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from "recharts";
 import { useBolig } from "../context/BoligContext";
+import SliderInput from "../components/SliderInput";
 
 const COLORS = [
   "#A1723A", "#EBC49F", "#F8A488", "#A3C9A8",
   "#B65D6C", "#C6C5B9", "#6A8D92"
 ];
 
-function formatNumber(value: number) {
-  return value === 0 ? "" : value.toLocaleString("no-NO");
-}
 const formatKr = (n: number) =>
   isNaN(n) ? "" : n.toLocaleString("no-NO", { style: "currency", currency: "NOK", maximumFractionDigits: 0 });
-function parseNumber(str: string): number {
-  return Number(str.replace(/[^\d]/g, ""));
-}
-
-// Gjenbrukbar input med slider og tusenskilletegn
-function SliderInput({ label, min, max, step, value, setValue }: {
-  label: string; min: number; max: number; step: number; value: number; setValue: (n: number) => void;
-}) {
-  const [editingValue, setEditingValue] = useState<string>(value === 0 ? "" : formatNumber(value));
-  useEffect(() => {
-    setEditingValue(value === 0 ? "" : formatNumber(value));
-  }, [value]);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/\s/g, "");
-    if (raw === "") {
-      setEditingValue("");
-      setValue(0);
-    } else {
-      const num = parseNumber(raw);
-      setEditingValue(num === 0 ? "" : formatNumber(num));
-      setValue(num);
-    }
-  };
-
-  const handleBlur = () => {
-    if (!editingValue || parseNumber(editingValue) === 0) {
-      setEditingValue("");
-      setValue(0);
-    } else {
-      const val = parseNumber(editingValue);
-      setEditingValue(formatNumber(val));
-      setValue(val);
-    }
-  };
-
-  return (
-    <div className="mb-4">
-      <label className="block font-semibold mb-1">{label}</label>
-      <input
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        pattern="[0-9\s]*"
-        className="w-full text-lg font-sans border rounded px-3 py-2 appearance-none focus:ring-2 focus:ring-brown-300 transition"
-        value={editingValue}
-        onChange={handleInputChange}
-        onBlur={handleBlur}
-        placeholder="0"
-      />
-      <input
-        type="range"
-        className="w-full mt-2 accent-brown-700 cursor-pointer"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={e => {
-          const v = Number(e.target.value);
-          setEditingValue(v === 0 ? "" : formatNumber(v));
-          setValue(v);
-        }}
-      />
-    </div>
-  );
-}
 
 export default function Utleiekalkulator() {
   const { boliger } = useBolig();
@@ -147,7 +79,7 @@ export default function Utleiekalkulator() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f8f5da] py-8 px-2">
+    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed py-8 px-2">
       <h1 className="text-3xl font-seriflogo font-bold text-brown-900 mb-6 text-center">Utleiekalkulator</h1>
       
       {/* NYTT: Velg importert bolig for autofyll */}

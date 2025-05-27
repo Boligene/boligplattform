@@ -1,41 +1,29 @@
-const express = require("express");
-const fetch = require("node-fetch");
-const cheerio = require("cheerio");
-const cors = require("cors");
+const puppeteer = require('puppeteer');
+const fs = require('fs');
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+async function hentBoligdata(finnUrl) {
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
 
-app.post("/api/parse-finn", async (req, res) => {
-  const { url } = req.body;
-  if (!url || !url.includes("finn.no")) return res.status(400).json({ error: "Mangler eller feil URL" });
+  await page.goto(finnUrl, { waitUntil: 'networkidle2' });
 
-  try {
-    const response = await fetch(url);
-    const html = await response.text();
-    const $ = cheerio.load(html);
+  // FINN PRIS
+  const pris = await page.$$eval('[data-testid="pricing-details"] span', spans => {
+    const match = spans.find(s => !s.textContent.includes("Prisantydning") && /\d/.test(s.textContent));
+    return match ? match.textContent.trim() : '';
+  });
 
-    // Prøv å hente ut de viktigste feltene. Her kan du utvide!
-    const pris = $('[data-testid="object-price"]').text().trim();
-    const adresse = $('[data-testid="address"]').text().trim();
-    const bilde = $('img[data-testid="gallery-image"]').attr("src");
-    const felleskost = $('dt:contains("Felleskost/mnd.")').next("dd").text().trim() ||
-                       $('dt:contains("Felleskostnader")').next("dd").text().trim();
-    const areal = $('[data-testid="object-area-primary"]').text().trim();
+  const adresse = await page.$eval('[data-testid="object-address"]', el => el.textContent.trim()).catch(() => '');
+  const tittel = await page.$eval('[data-testid="object-title"]', el => el.textContent.trim()).catch(() => '');
+  const bilde = await page.$eval('meta[property="og:image"]', el => el.content).catch(() => '');
 
-    res.json({
-      pris,
-      adresse,
-      bilde,
-      felleskost,
-      areal,
-      // Legg til mer ved behov!
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Klarte ikke hente FINN-data" });
-  }
-});
+  await browser.close();
 
-const PORT = process.env.PORT || 4444;
-app.listen(PORT, () => console.log("FINN-scraper server kjører på port", PORT));
+  const boligData = { adresse, pris, tittel, bilde };
+  fs.writeFileSync('bolig.json', JSON.stringify(boligData, null, 2), 'utf-8');
+  console.log('✅ Boligdata lagret til bolig.json');
+  return boligData;
+}
+
+const finnUrl = 'https://www.finn.no/realestate/homes/ad.html?finnkode=407990760';
+hentBoligdata(finnUrl).then(console.log).catch(console.error);
