@@ -8,6 +8,7 @@ import Oppussing from './pages/Oppussing';
 import Utleiekalkulator from "./pages/Utleiekalkulator";
 import Kjopskalkulator from "./pages/Kjopskalkulator";
 import Verdivurdering from './pages/Verdivurdering';
+import TakstrapportAnalyse from "./pages/TakstrapportAnalyse";
 
 // Header-komponent
 function Header() {
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/oppussing" element={<Oppussing />} />
         <Route path="/sammenlign" element={<Sammenlign />} />
         <Route path="/verdivurdering" element={<Verdivurdering />} />
+        <Route path="/takstrapportanalyse" element={<TakstrapportAnalyse />} />
       </Routes>
     </>
   );
