@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import * as React from "react";
 import { useBolig } from "../context/BoligContext";
-import { Home, Hammer, Calculator, Star, ArrowRight, Trash2, Check } from "lucide-react";
+import { Home, Hammer, Calculator, Star, ArrowRight, Trash2, Check, FileText } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
 // Hjelpefunksjon for lagring i localStorage
@@ -22,13 +22,13 @@ export default function HomePage() {
     removeBolig
   } = useBolig();
 
-  const [finnUrl, setFinnUrl] = useState("");
-  const [feilmelding, setFeilmelding] = useState("");
-  const [laster, setLaster] = useState(false);
+  const [finnUrl, setFinnUrl] = React.useState("");
+  const [feilmelding, setFeilmelding] = React.useState("");
+  const [laster, setLaster] = React.useState(false);
   const navigate = useNavigate();
 
   // Hent fra localStorage ved oppstart
-  useEffect(() => {
+  React.useEffect(() => {
     if (boliger.length === 0) {
       const lagret = hentBoligerLokalt();
       if (lagret.length > 0) {
@@ -39,7 +39,7 @@ export default function HomePage() {
   }, []);
 
   // Oppdater localStorage når boliger endres
-  useEffect(() => {
+  React.useEffect(() => {
     lagreBoligerLokalt(boliger);
   }, [boliger]);
 
@@ -97,10 +97,10 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
-      <main className="flex flex-col items-center justify-center flex-1">
+    <div className="min-h-screen w-full bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col overflow-x-hidden">
+      <main className="flex flex-col items-center justify-center flex-1 w-full">
 
-        <div className="bg-white/80 rounded-2xl shadow-xl p-10 w-full max-w-2xl flex flex-col items-center mb-8">
+        <div className="bg-white/80 rounded-2xl shadow-xl p-2 sm:p-6 md:p-10 w-full max-w-2xl flex flex-col items-center mb-8">
           <h2 className="text-4xl font-seriflogo font-bold text-brown-900 text-center mb-6 leading-tight">
             Kom i gang med<br />boligreisen din
           </h2>
@@ -204,8 +204,8 @@ export default function HomePage() {
         </div>
 
         {/* Meny, behold som før */}
-        <section className="w-full max-w-4xl flex flex-col items-center">
-          <div className="bg-white/70 rounded-2xl shadow-lg px-8 py-6 w-full flex flex-col md:flex-row items-center justify-center gap-8 mb-8">
+        <section className="w-full max-w-4xl flex flex-col items-center px-2 sm:px-0">
+          <div className="bg-white/70 rounded-2xl shadow-lg px-2 sm:px-8 py-4 sm:py-6 w-full flex flex-col md:flex-row items-center justify-center gap-4 sm:gap-8 mb-8">
             <Link to="/boliger" className="flex flex-col items-center group cursor-pointer transition hover:scale-105 active:scale-95">
               <div className="bg-brown-100 rounded-full w-16 h-16 flex items-center justify-center shadow group-hover:bg-brown-200 transition mb-2">
                 <Home className="w-8 h-8 text-brown-800" />
@@ -235,6 +235,12 @@ export default function HomePage() {
                 <Star className="w-8 h-8 text-brown-800" />
               </div>
               <span className="font-semibold text-brown-800 mb-1">Mine boliger</span>
+            </Link>
+            <Link to="/takstrapportanalyse" className="flex flex-col items-center group cursor-pointer transition hover:scale-105 active:scale-95">
+              <div className="bg-brown-100 rounded-full w-16 h-16 flex items-center justify-center shadow group-hover:bg-brown-200 transition mb-2">
+                <FileText className="w-8 h-8 text-brown-800" />
+              </div>
+              <span className="font-semibold text-brown-800 mb-1">Takstrapportanalyse</span>
             </Link>
           </div>
         </section>
