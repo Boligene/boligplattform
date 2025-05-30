@@ -17,6 +17,7 @@ export type Bolig = {
   kommunaleAvg?: string;
   eiendomsskatt?: string;
   felleskostnader?: string;
+  fellesgjeld?: string;
 };
 
 type BoligContextType = {

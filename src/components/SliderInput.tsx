@@ -7,8 +7,8 @@ function parseNumber(str: string): number {
   return Number(str.replace(/[^\d]/g, ""));
 }
 
-export default function SliderInput({ label, min, max, step, value, setValue }: {
-  label: React.ReactNode; min: number; max: number; step: number; value: number; setValue: (n: number) => void;
+export default function SliderInput({ label, min, max, step, value, setValue, disabled = false }: {
+  label: React.ReactNode; min: number; max: number; step: number; value: number; setValue: (n: number) => void; disabled?: boolean;
 }) {
   const [editingValue, setEditingValue] = useState<string>(value === 0 ? "" : formatNumber(value));
   useEffect(() => {
@@ -51,6 +51,7 @@ export default function SliderInput({ label, min, max, step, value, setValue }: 
         onChange={handleInputChange}
         onBlur={handleBlur}
         placeholder="0"
+        disabled={disabled}
       />
       <input
         type="range"
@@ -64,6 +65,7 @@ export default function SliderInput({ label, min, max, step, value, setValue }: 
           setEditingValue(v === 0 ? "" : formatNumber(v));
           setValue(v);
         }}
+        disabled={disabled}
       />
     </div>
   );
