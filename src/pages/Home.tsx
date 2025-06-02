@@ -2,6 +2,8 @@ import * as React from "react";
 import { useBolig } from "../context/BoligContext";
 import { Home, Hammer, Calculator, Star, ArrowRight, Trash2, Check, FileText } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { supabase } from '../supabaseClient';
+import { useEffect, useState } from 'react';
 
 // Hjelpefunksjon for lagring i localStorage
 function lagreBoligerLokalt(boliger: any[]) {
@@ -26,6 +28,9 @@ export default function HomePage() {
   const [feilmelding, setFeilmelding] = React.useState("");
   const [laster, setLaster] = React.useState(false);
   const navigate = useNavigate();
+  const [user, setUser] = useState<any>(null);
+  const [lagreStatus, setLagreStatus] = useState<{[id: string]: string}>({});
+  const [favoritter, setFavoritter] = useState<{[id: string]: boolean}>({});
 
   // Hent fra localStorage ved oppstart
   React.useEffect(() => {
@@ -42,6 +47,32 @@ export default function HomePage() {
   React.useEffect(() => {
     lagreBoligerLokalt(boliger);
   }, [boliger]);
+
+  useEffect(() => {
+    const getSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      setUser(data.session?.user ?? null);
+    };
+    getSession();
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Hent favoritter fra Supabase for innlogget bruker
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('boliger').select('id, adresse').eq('bruker_id', user.id).then(({ data }) => {
+      if (data) {
+        const favs: {[id: string]: boolean} = {};
+        data.forEach((b: any) => { favs[b.adresse] = true; });
+        setFavoritter(favs);
+      }
+    });
+  }, [user]);
 
   async function handleHentData(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -96,6 +127,30 @@ export default function HomePage() {
     }
   }
 
+  async function handleLagreIBasen(bolig: any) {
+    if (!user) return;
+    setLagreStatus(s => ({...s, [bolig.id]: 'Lagrer...'}));
+    // Ikke send med id, la Supabase generere denne automatisk
+    const boligData = { ...bolig };
+    delete boligData.id;
+    boligData.bruker_id = user.id;
+    const { error } = await supabase.from('boliger').insert([boligData]);
+    if (error) setLagreStatus(s => ({...s, [bolig.id]: 'Feil!'}));
+    else {
+      setLagreStatus(s => ({...s, [bolig.id]: 'Lagret!'}));
+      setFavoritter(f => ({...f, [bolig.adresse]: true}));
+    }
+  }
+
+  async function handleFjernFraFavoritter(bolig: any) {
+    if (!user) return;
+    setLagreStatus(s => ({...s, [bolig.id]: 'Fjerner...'}));
+    // Slett fra Supabase basert på adresse og bruker_id (eller annen unik identifikator)
+    await supabase.from('boliger').delete().eq('bruker_id', user.id).eq('adresse', bolig.adresse);
+    setLagreStatus(s => ({...s, [bolig.id]: ''}));
+    setFavoritter(f => ({...f, [bolig.adresse]: false}));
+  }
+
   return (
     <div className="min-h-screen w-full bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col overflow-x-hidden">
       <main className="flex flex-col items-center justify-center flex-1 w-full">
@@ -143,6 +198,7 @@ export default function HomePage() {
               <div className="flex flex-col gap-4">
                 {boliger.map((bolig: any, i: number) => {
                   const valgt = valgtForSammenligning?.includes(bolig.id);
+                  const erFavoritt = favoritter[bolig.adresse];
                   return (
                     <div
                       key={bolig.id}
@@ -165,6 +221,22 @@ export default function HomePage() {
                         className="absolute top-4 left-4 w-5 h-5 accent-green-600"
                         aria-label="Velg for sammenligning"
                       />
+                      {/* Favoritt-checkbox */}
+                      {user && (
+                        <label className="absolute top-4 left-12 flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!erFavoritt}
+                            onChange={e => {
+                              if (e.target.checked) handleLagreIBasen(bolig);
+                              else handleFjernFraFavoritter(bolig);
+                            }}
+                            className="w-5 h-5 accent-brown-600"
+                            aria-label="Lagre i Mine boliger"
+                          />
+                          <span className="text-xs text-brown-700">Favoritt</span>
+                        </label>
+                      )}
                       {/* Valgt ikon */}
                       {valgt && (
                         <span className="absolute top-4 left-4 bg-green-600 rounded-full p-1">
@@ -185,6 +257,15 @@ export default function HomePage() {
                           <div className="mt-2 text-green-700 font-semibold">Valgt for sammenligning</div>
                         )}
                       </div>
+                      {user && (
+                        <button
+                          className="mt-2 px-4 py-2 rounded-full bg-brown-500 text-white font-semibold hover:bg-brown-600 transition shadow"
+                          onClick={() => handleLagreIBasen(bolig)}
+                          disabled={lagreStatus[bolig.id] === 'Lagret!'}
+                        >
+                          {lagreStatus[bolig.id] || 'Lagre i Mine boliger'}
+                        </button>
+                      )}
                     </div>
                   );
                 })}

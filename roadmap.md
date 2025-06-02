@@ -1,100 +1,117 @@
+Her er et oppdatert og **korrekt** roadmap for `roadmap.md`, basert på hva du faktisk har ferdigstilt, hva som er under arbeid, og hva som gjenstår – med ryddig status for alle punkter, klare kommentarer og bedre struktur:
+
+---
+
 # Boligplattform Roadmap
 
-> **Oppdatert:** 26.05.2025  
-> _Status: Løpende arbeid – husk å oppdatere etter hvert!_
+> **Oppdatert:** 27.05.2025
+> *Status: Løpende arbeid – oppdater jevnlig!*
 
 ---
 
 ## 🚀 Kjernefunksjoner (MVP)
 
-| Funksjon                                            | Status     | Kommentar                              |
-|-----------------------------------------------------|------------|----------------------------------------|
-| **Boligsøk med FINN-integrasjon**                   | Ferdig     | Scraping/innhenting av boligdata fra FINN-lenke fungerer. |
-| **Sammenligning av boliger**                        | Ferdig     | Side-ved-side sammenligning implementert.              |
-| **Boliglånskalkulator**                             | Ferdig     | Klar til bruk.                         |
-| **Kjøpskalkulator**                                 | Ferdig     | Ser bra ut for MVP
-| **Oppussingskalkulator**                            | Ferdig     | Ser bra ut for MVP
-| **Utleiekalkulator**                                | Ferdig     | Ser bra ut for MVP
-| **Verdivurderingsverktøy**                          | Ikke startet | Skal estimere boligverdi basert på historiske salg. |
-| **Budrundeverktøy**                                 | Ikke startet | Tips, strategier og budsimulator.      |
-| **Sjekkliste for visning**                          | Ikke startet | Interaktiv sjekkliste under visning.   |
-| **Sjekkliste for boligkjøp**                        | Ikke startet | Steg-for-steg liste før, under, etter kjøp. |
+| Funksjon                          | Status       | Kommentar                                                     |
+| --------------------------------- | ------------ | ------------------------------------------------------------- |
+| **Boligsøk med FINN-integrasjon** | Ferdig       | Scraping fra FINN-lenke er på plass og fungerer.              |
+| **Sammenligning av boliger**      | Ferdig       | Side-ved-side sammenligning er implementert.                  |
+| **Boliglånskalkulator**           | Utgår        | Droppet – funksjonene dekkes av kjøpskalkulatoren.            |
+| **Kjøpskalkulator**               | Pågår        | Grunnleggende ferdig, men trenger forbedringer/utvidelse.     |
+| **Oppussingskalkulator**          | Pågår        | Grunnleggende ferdig, utvides med flere romtyper og detaljer. |
+| **Utleiekalkulator**              | Pågår        | Grunnleggende ferdig, må forbedres for MVP.                   |
+| **Verdivurderingsverktøy**        | Ferdig       | Basert på adresse/postnr, kvm og åpne SSB-data.               |
+| **AI-takstrapport-analyse**       | Ferdig       | Last opp PDF, få oppsummering og nøkkelpunkter med AI.        |
+| **Budrundeverktøy**               | Ikke startet | Tips, strategi og simulering.                                 |
+| **Sjekkliste for visning**        | Ikke startet | Interaktiv liste for visningsrunde.                           |
+| **Sjekkliste for boligkjøp**      | Ikke startet | Steg-for-steg liste før, under og etter kjøp.                 |
 
 ---
 
 ## 🔥 Avanserte funksjoner (må med i første lansering)
 
-| Funksjon                                            | Status         | Kommentar                            |
-|-----------------------------------------------------|----------------|--------------------------------------|
-| **Innlogging og brukerprofiler**                    | Ikke startet   | Brukere kan lagre favoritter osv.    |
-| **AI-basert analyse av takstrapport**               | Ikke startet   | Last opp takstrapport, få nøkkelpunkter. |
-| **Personlig kjøpsplanlegger**                       | Ikke startet   | Skreddersydd kjøpsløp.               |
-| **Varsler / Boligalarm**                            | Ikke startet   | Push-varsel ved nye relevante boliger.|
+| Funksjon                         | Status       | Kommentar                                         |
+| -------------------------------- | ------------ | ------------------------------------------------- |
+| **Innlogging og brukerprofiler** | Ikke startet | Mulighet for å lagre favoritter og kalkulasjoner. |
+| **Personlig kjøpsplanlegger**    | Ikke startet | Skreddersydd plan og påminnelser for bruker.      |
+| **Varsler / Boligalarm**         | Ikke startet | Push-varsel for relevante boliger.                |
 
 ---
 
 ## 🧩 Ekstra funksjoner (Fase 2+)
 
-- Kontraktsguide
-- Låneguide
-- Planløsning-redigering
-- Boligkjøpskurs (artikler/video)
-- Chatbot assistent
+* Kontraktsguide
+* Låneguide
+* Planløsning-redigering
+* Boligkjøpskurs (artikler/video)
+* Chatbot assistent
 
 ---
 
 ## 🎯 **Prioritert utviklingsrekkefølge**
 
 1. **Grunnmur**
-    - Brukerregistrering & Dashboard _(ikke startet)_
-    - FINN-lenke input / scraping _(ferdig)_
-    - Databaseoppsett _(ikke startet)_
+
+   * Brukerregistrering & Dashboard `[ ] Ikke startet`
+   * FINN-lenke input / scraping `[x] Ferdig`
+   * Databaseoppsett `[ ] Ikke startet`
 2. **Nøkkelfunksjoner**
-    - Sammenligningsverktøy _(ferdig)_
-    - Boliglånskalkulator _(ferdig)_
-    - Kjøpskalkulator _(pågår)_
-    - Oppussingskalkulator _(pågår)_
-    - Utleiekalkulator _(pågår)_
-    - Verdivurderingsverktøy _(ikke startet)_
+
+   * Sammenligningsverktøy `[x] Ferdig`
+   * Kjøpskalkulator `[~] Pågår`
+   * Oppussingskalkulator `[~] Pågår`
+   * Utleiekalkulator `[~] Pågår`
+   * Verdivurderingsverktøy `[x] Ferdig`
+   * AI-takstrapport-analyse `[x] Ferdig`
 3. **Smart assistanse**
-    - AI-takstrapport-analyse _(ikke startet)_
-    - Personlig kjøpsplanlegger _(ikke startet)_
-    - Sjekklister _(ikke startet)_
+
+   * Personlig kjøpsplanlegger `[ ] Ikke startet`
+   * Sjekklister `[ ] Ikke startet`
 4. **Ekstra verdi**
-    - Boligalarm _(ikke startet)_
-    - Dashboard-oppfølging _(ikke startet)_
+
+   * Boligalarm `[ ] Ikke startet`
+   * Dashboard-oppfølging `[ ] Ikke startet`
 5. **Finpuss før lansering**
-    - Designpolering, responsivitet, brukertest
+
+   * Designpolering, responsivitet, brukertest
 
 ---
 
 ## ✅ **Ferdige funksjoner**
-- FINN-integrasjon for import av bolig
-- Sammenligning av boliger (side-ved-side)
-- Boliglånskalkulator
+
+* FINN-integrasjon for import av boligdata
+* Sammenligning av boliger (side-ved-side)
+* Verdivurderingsverktøy (adresse/postnr + kvm + SSB-data)
+* AI-basert takstrapport-analyse (PDF/text upload)
 
 ## 🏗️ **Pågående funksjoner**
-- Kjøpskalkulator (trenger flere detaljer)
-- Oppussingskalkulator (trenger flere detaljer/romtyper)
-- Utleiekalkulator (trenger forbedring)
+
+* Kjøpskalkulator (utvides)
+* Oppussingskalkulator (flere rom og materialvalg)
+* Utleiekalkulator (flere detaljer og beregninger)
 
 ## 🚩 **Ikke startet**
-- Verdivurdering
-- Budrundeverktøy
-- Sjekklister
-- AI-funksjoner
-- Brukerprofiler/innlogging
-- Dashboard
-- Push-varsler
-- Ekstra guider/assistent
+
+* Budrundeverktøy
+* Sjekkliste for visning
+* Sjekkliste for boligkjøp
+* Innlogging/brukerprofiler
+* Dashboard
+* Boligalarm/varsler
+* Personlig kjøpsplanlegger
+* Ekstra guider/kurs/chatbot
 
 ---
 
-**Neste steg:**  
-> Fortsett å utbedre kjøpskalkulator, oppussingskalkulator og utleiekalkulator til fullverdig versjon (hent inn manglende kostnader/data).
+**Neste steg:**
+
+> Gjør ferdig og utvid kjøpskalkulator, oppussingskalkulator og utleiekalkulator til fullverdig MVP-nivå.
 
 ---
 
-**Tips:**  
+**Tips:**
 Marker funksjoner som `[x] Ferdig`, `[~] Pågår`, eller `[ ] Ikke startet` etter hvert for enkel statuskontroll!
 
+---
+
+**Lim denne direkte inn i `roadmap.md` så har du full oversikt og riktig status.**
+Gi beskjed når du vil ta neste steg eller hvis noe mangler!
