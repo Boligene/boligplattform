@@ -51,7 +51,7 @@ function Header() {
           to="/login"
           className="rounded-full px-6 py-2 bg-brown-100 text-brown-800 font-semibold hover:bg-brown-200 transition shadow w-full sm:w-auto text-center"
         >
-          Logg inn
+        Logg inn
         </Link>
       )}
     </header>

@@ -57,7 +57,7 @@ export default function Kjopskalkulator() {
   const [felleskostnader, setFelleskostnader] = useState<number>(0);
   const [strom, setStrom] = useState<number>(0);
   const [stromManuelt, setStromManuelt] = useState<boolean>(false);
-  const [kommunaleAvg, setKommunaleAvg] = useState<number>(12000); // default 12 000 kr/år
+  const [kommunaleAvg, setKommunaleAvg] = useState<number>(0); // default 0 kr/år
   const [andreOmkostninger, setAndreOmkostninger] = useState<number>(0); // engangskostnad
   const [andreUtgifter, setAndreUtgifter] = useState<number>(0);
   const [bruksareal, setBruksareal] = useState<number>(50); // default 50 kvm
@@ -74,7 +74,7 @@ export default function Kjopskalkulator() {
     setFelleskostnader(Number(bolig.felleskostnader) || 0);
     setEiendomsskatt(Number(bolig.eiendomsskatt) || 0);
     setBruksareal(Number(bolig.bruksareal) || 50);
-    setKommunaleAvg(Number(bolig.kommunaleAvg) || 12000);
+    setKommunaleAvg(Number(bolig.kommunaleAvg) || 0);
     setStromManuelt(false);
     setStrom(enkelStromBeregning(Number(bolig.bruksareal) || 50));
     setEgenkapitalManuelt(false);
@@ -340,7 +340,7 @@ export default function Kjopskalkulator() {
           />
           <SliderInput
             label={<span>Bruksareal (kvm) <Tooltip text="Boligens bruksareal. Brukes til å beregne strøm. Hentes fra FINN hvis mulig." /></span>}
-            min={10}
+            min={0}
             max={500}
             step={1}
             value={bruksareal}
@@ -355,7 +355,7 @@ export default function Kjopskalkulator() {
             setValue={handleStromChange}
           />
           <SliderInput
-            label={<span>Kommunale avgifter (kr/år) <Tooltip text="Årlige avgifter til kommunen. Standard: 12 000 kr/år. Gjelder ikke borettslag." /></span>}
+            label={<span>Kommunale avgifter (kr/år) <Tooltip text="Årlige avgifter til kommunen. Standard: 0 kr/år. Gjelder ikke borettslag." /></span>}
             min={0}
             max={40000}
             step={500}

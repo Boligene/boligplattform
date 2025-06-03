@@ -30,7 +30,7 @@ export default function HomePage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
   const [lagreStatus, setLagreStatus] = useState<{[id: string]: string}>({});
-  const [favoritter, setFavoritter] = useState<{[id: string]: boolean}>({});
+  const [favoritter, setFavoritter] = useState<{[localId: string]: string}>({});
 
   // Hent fra localStorage ved oppstart
   React.useEffect(() => {
@@ -65,10 +65,14 @@ export default function HomePage() {
   // Hent favoritter fra Supabase for innlogget bruker
   useEffect(() => {
     if (!user) return;
-    supabase.from('boliger').select('id, adresse').eq('bruker_id', user.id).then(({ data }) => {
+    supabase.from('boliger').select('id, adresse, pris, type, bilde, lenke').eq('bruker_id', user.id).then(({ data }) => {
       if (data) {
-        const favs: {[id: string]: boolean} = {};
-        data.forEach((b: any) => { favs[b.adresse] = true; });
+        const favs: {[localId: string]: string} = {};
+        data.forEach((b: any) => {
+          // Lag en lokal nøkkel basert på adresse+pris+type for å matche importerte boliger
+          const localKey = `${b.adresse}|${b.pris}|${b.type}`;
+          favs[localKey] = b.id;
+        });
         setFavoritter(favs);
       }
     });
@@ -130,25 +134,34 @@ export default function HomePage() {
   async function handleLagreIBasen(bolig: any) {
     if (!user) return;
     setLagreStatus(s => ({...s, [bolig.id]: 'Lagrer...'}));
-    // Ikke send med id, la Supabase generere denne automatisk
     const boligData = { ...bolig };
     delete boligData.id;
     boligData.bruker_id = user.id;
-    const { error } = await supabase.from('boliger').insert([boligData]);
-    if (error) setLagreStatus(s => ({...s, [bolig.id]: 'Feil!'}));
-    else {
+    console.log("user.id fra Supabase Auth:", user?.id, boligData);
+    const { data, error } = await supabase.from('boliger').insert([boligData]).select();
+    if (error || !data || !data[0]) {
+      setLagreStatus(s => ({...s, [bolig.id]: 'Feil!'}));
+    } else {
       setLagreStatus(s => ({...s, [bolig.id]: 'Lagret!'}));
-      setFavoritter(f => ({...f, [bolig.adresse]: true}));
+      const localKey = `${bolig.adresse}|${bolig.pris}|${bolig.type}`;
+      setFavoritter(f => ({...f, [localKey]: data[0].id}));
     }
   }
 
   async function handleFjernFraFavoritter(bolig: any) {
     if (!user) return;
     setLagreStatus(s => ({...s, [bolig.id]: 'Fjerner...'}));
-    // Slett fra Supabase basert på adresse og bruker_id (eller annen unik identifikator)
-    await supabase.from('boliger').delete().eq('bruker_id', user.id).eq('adresse', bolig.adresse);
+    const localKey = `${bolig.adresse}|${bolig.pris}|${bolig.type}`;
+    const supabaseId = favoritter[localKey];
+    if (supabaseId) {
+      await supabase.from('boliger').delete().eq('id', supabaseId).eq('bruker_id', user.id);
+    }
     setLagreStatus(s => ({...s, [bolig.id]: ''}));
-    setFavoritter(f => ({...f, [bolig.adresse]: false}));
+    setFavoritter(f => {
+      const copy = { ...f };
+      delete copy[localKey];
+      return copy;
+    });
   }
 
   return (
@@ -198,7 +211,8 @@ export default function HomePage() {
               <div className="flex flex-col gap-4">
                 {boliger.map((bolig: any, i: number) => {
                   const valgt = valgtForSammenligning?.includes(bolig.id);
-                  const erFavoritt = favoritter[bolig.adresse];
+                  const localKey = `${bolig.adresse}|${bolig.pris}|${bolig.type}`;
+                  const erFavoritt = !!favoritter[localKey];
                   return (
                     <div
                       key={bolig.id}
@@ -226,7 +240,7 @@ export default function HomePage() {
                         <label className="absolute top-4 left-12 flex items-center gap-1 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={!!erFavoritt}
+                            checked={erFavoritt}
                             onChange={e => {
                               if (e.target.checked) handleLagreIBasen(bolig);
                               else handleFjernFraFavoritter(bolig);
