@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useBolig } from "../context/BoligContext";
-import { Home, Hammer, Calculator, Star, ArrowRight, Trash2, Check, FileText } from "lucide-react";
+import { Home, Hammer, Calculator, Star, ArrowRight, Trash2, Check, FileText, HelpCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from '../supabaseClient';
 import { useEffect, useState } from 'react';
@@ -301,7 +301,7 @@ export default function HomePage() {
         {/* Meny, behold som før */}
         <section className="w-full max-w-2xl flex flex-col items-center px-2 sm:px-0">
           <div className="bg-white/70 rounded-2xl shadow-lg px-2 sm:px-8 py-4 sm:py-6 w-full mb-8">
-            <div className="grid grid-cols-3 gap-y-6 gap-x-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-6 gap-x-6">
               <Link to="/boliger" className="flex flex-col items-center min-w-[110px] group cursor-pointer transition hover:scale-105 active:scale-95">
                 <div className="bg-brown-100 rounded-full w-16 h-16 flex items-center justify-center shadow group-hover:bg-brown-200 transition mb-2">
                   <Home className="w-8 h-8 text-brown-800" />
@@ -319,6 +319,12 @@ export default function HomePage() {
                   <Calculator className="w-8 h-8 text-brown-800" />
                 </div>
                 <span className="font-semibold text-brown-800 mb-1 text-center text-sm sm:text-base whitespace-normal break-words">Kjøpskostnadskalkulator</span>
+              </Link>
+              <Link to="/hjelpeverktoy-for-boligkjopere" className="flex flex-col items-center min-w-[110px] group cursor-pointer transition hover:scale-105 active:scale-95">
+                <div className="bg-brown-100 rounded-full w-16 h-16 flex items-center justify-center shadow group-hover:bg-brown-200 transition mb-2">
+                  <HelpCircle className="w-8 h-8 text-brown-800" />
+                </div>
+                <span className="font-semibold text-brown-800 mb-1 text-center text-sm sm:text-base whitespace-normal break-words">Hjelpeverktøy</span>
               </Link>
               <Link to="/verdivurdering" className="flex flex-col items-center min-w-[110px] group cursor-pointer transition hover:scale-105 active:scale-95">
                 <div className="bg-brown-100 rounded-full w-16 h-16 flex items-center justify-center shadow group-hover:bg-brown-200 transition mb-2">
