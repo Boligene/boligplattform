@@ -31,7 +31,7 @@ Her er et oppdatert og **korrekt** roadmap for `roadmap.md`, basert på hva du f
 
 | Funksjon                         | Status       | Kommentar                                         |
 | -------------------------------- | ------------ | ------------------------------------------------- |
-| **Innlogging og brukerprofiler** | Ikke startet | Mulighet for å lagre favoritter og kalkulasjoner. |
+| **Innlogging og brukerprofiler** | startet | Mulighet for å lagre favoritter og kalkulasjoner. |
 | **Personlig kjøpsplanlegger**    | Ikke startet | Skreddersydd plan og påminnelser for bruker.      |
 | **Varsler / Boligalarm**         | Ikke startet | Push-varsel for relevante boliger.                |
 
