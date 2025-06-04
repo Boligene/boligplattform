@@ -12,6 +12,7 @@ import TakstrapportAnalyse from "./pages/TakstrapportAnalyse";
 import Login from './pages/Login';
 import BoligerDataExample from './pages/BoligerDataExample';
 import SjekklisteVisning from './pages/SjekklisteVisning';
+import SjekklisteForBoligkjop from './pages/SjekklisteForBoligkjop';
 import HjelpeverktoyForBoligkjopere from './pages/HjelpeverktoyForBoligkjopere';
 import LogoutButton from './components/LogoutButton';
 import { useEffect, useState } from 'react';
@@ -78,6 +79,7 @@ const App: React.FC = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/BoligerDataExample" element={<BoligerDataExample />} />
         <Route path="/sjekkliste-visning" element={<SjekklisteVisning />} />
+        <Route path="/sjekkliste-for-boligkjop" element={<SjekklisteForBoligkjop />} />
         <Route path="/hjelpeverktoy-for-boligkjopere" element={<HjelpeverktoyForBoligkjopere />} />
       </Routes>
     </>
