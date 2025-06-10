@@ -5,6 +5,7 @@ import Kalkulatorer from "./pages/Kalkulatorer";
 import MineBoliger from './pages/MineBoliger';
 import Boliger from './pages/Boliger';
 import Oppussing from './pages/Oppussing';
+import OppussingPremium from './pages/OppussingPremium';
 import Utleiekalkulator from "./pages/Utleiekalkulator";
 import Kjopskalkulator from "./pages/Kjopskalkulator";
 import Verdivurdering from './pages/Verdivurdering';
@@ -73,6 +74,7 @@ const App: React.FC = () => {
         <Route path="/mineboliger" element={<MineBoliger />} />
         <Route path="/boliger" element={<Boliger />} />
         <Route path="/oppussing" element={<Oppussing />} />
+        <Route path="/oppussing-premium" element={<OppussingPremium />} />
         <Route path="/sammenlign" element={<Sammenlign />} />
         <Route path="/verdivurdering" element={<Verdivurdering />} />
         <Route path="/takstrapportanalyse" element={<TakstrapportAnalyse />} />

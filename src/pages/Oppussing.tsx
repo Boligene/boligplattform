@@ -13,7 +13,7 @@
 */
 
 import React, { useState } from "react";
-import { Hammer, Paintbrush, Bath, BedDouble, Sofa, DoorOpen, Info } from "lucide-react";
+import { Hammer, Paintbrush, Bath, BedDouble, Sofa, DoorOpen, Info, Star } from "lucide-react";
 
 const romIkoner: Record<string, React.ReactNode> = {
   "Kjøkken": <Hammer className="inline w-5 h-5 mr-1 text-brown-700" />, // Hammer for kjøkken
@@ -47,7 +47,7 @@ export default function Oppussing() {
 
   // For inputfeltene
   const [rom, setRom] = useState(romtyper[0].navn);
-  const [areal, setAreal] = useState(10);
+  const [areal, setAreal] = useState(0);
   const [finish, setFinish] = useState("standard");
   // Liste over alle rom lagt til
   const [romListe, setRomListe] = useState<{
@@ -135,6 +135,28 @@ export default function Oppussing() {
         <h2 className="text-3xl font-seriflogo font-bold text-brown-900 mb-6">
           Oppussingskalkulator
         </h2>
+        
+        {/* Premium upgrade banner */}
+        <div className="w-full mb-6 bg-gradient-to-r from-yellow-50 to-brown-50 border border-yellow-200 rounded-2xl p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-yellow-100 rounded-full p-2">
+                <Star className="w-5 h-5 text-yellow-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brown-900">Oppgrader til Premium</h3>
+                <p className="text-sm text-brown-700">Få detaljerte kostnadsoversikter, ROI-analyse og mer</p>
+              </div>
+            </div>
+            <a
+              href="/oppussing-premium"
+              className="bg-brown-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-brown-800 transition text-sm"
+            >
+              Prøv Premium
+            </a>
+          </div>
+        </div>
+
         {/* Input-seksjon */}
         <div className="w-full border border-brown-200 rounded-2xl bg-white/90 p-6 mb-6">
           <form className="flex flex-col gap-4" onSubmit={leggTilRom}>
