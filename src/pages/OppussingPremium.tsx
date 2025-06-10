@@ -191,7 +191,8 @@ export default function OppussingPremium() {
 
   // Beregne estimert ferdigstillelse
   const calculateCompletionTime = () => {
-    const totalHours = romListe.reduce((sum, r) => sum + r.tidsEstimat, 0);
+    const totalHours = romListe.reduce((sum, r) => sum + (r.tidsEstimat || 0), 0);
+    if (totalHours === 0) return 0;
     const workDaysPerWeek = 5;
     const hoursPerDay = 8;
     const weeks = Math.ceil(totalHours / (workDaysPerWeek * hoursPerDay));
@@ -202,54 +203,64 @@ export default function OppussingPremium() {
   const leggTilRom = (e: React.FormEvent) => {
     e.preventDefault();
     const arealNum = parseFloat(areal as string);
-    if (arealNum <= 0 || !arealNum) return;
+    if (arealNum <= 0 || !arealNum || isNaN(arealNum)) return;
 
-    const kvalitetData = qualityLevels.find(k => k.value === kvalitet)!;
+    const kvalitetData = qualityLevels.find(k => k.value === kvalitet);
     const regionData = regionMultipliers[region];
     const sesongData = seasonMultipliers[sesong];
     const roomBreakdown = workBreakdown[rom];
+
+    if (!kvalitetData || !regionData || !sesongData || !roomBreakdown) {
+      console.error('Manglende data for beregning');
+      return;
+    }
 
     let totalMaterialKost = 0;
     let totalArbeidKost = 0;
     let totalTid = 0;
     const detaljertBreakdown: Record<string, ProcessedWorkItem> = {};
 
-    Object.entries(roomBreakdown).forEach(([key, work]) => {
-      // Materialkostnad (justert for kvalitet, region og sesong)
-      const materialCost = work.pricePerM2 * arealNum * kvalitetData.multiplier * regionData.multiplier * sesongData.multiplier;
-      
-      // Arbeidskostnad (basert på timer og timepriser, justert for region og sesong)
-      const laborCost = work.hours * arealNum * craftHourlyRates[work.craftType] * regionData.multiplier * sesongData.multiplier;
-      
-      // Total kostnad for denne arbeidsoppgaven
-      const totalCostForTask = materialCost + laborCost;
-      
-      totalMaterialKost += materialCost;
-      totalArbeidKost += laborCost;
-      totalTid += work.hours * arealNum;
-      
-      detaljertBreakdown[key] = {
-        ...work,
-        adjustedCost: totalCostForTask,
-        laborCost: laborCost
+    try {
+      Object.entries(roomBreakdown).forEach(([key, work]) => {
+        // Materialkostnad (justert for kvalitet, region og sesong)
+        const materialCost = (work.pricePerM2 || 0) * arealNum * kvalitetData.multiplier * regionData.multiplier * sesongData.multiplier;
+        
+        // Arbeidskostnad (basert på timer og timepriser, justert for region og sesong)
+        const laborCost = (work.hours || 0) * arealNum * (craftHourlyRates[work.craftType] || 0) * regionData.multiplier * sesongData.multiplier;
+        
+        // Total kostnad for denne arbeidsoppgaven
+        const totalCostForTask = materialCost + laborCost;
+        
+        totalMaterialKost += materialCost;
+        totalArbeidKost += laborCost;
+        totalTid += (work.hours || 0) * arealNum;
+        
+        detaljertBreakdown[key] = {
+          ...work,
+          adjustedCost: totalCostForTask,
+          laborCost: laborCost
+        };
+      });
+
+      const totalKostForRoom = totalMaterialKost + totalArbeidKost;
+
+      const nyRoom: RoomDetails = {
+        navn: rom,
+        areal: arealNum,
+        kvalitet: kvalitetData.label,
+        breakdown: detaljertBreakdown,
+        totalKost: totalKostForRoom,
+        arbeidKost: totalArbeidKost,
+        materialKost: totalMaterialKost,
+        tidsEstimat: totalTid
       };
-    });
 
-    const totalKostForRoom = totalMaterialKost + totalArbeidKost;
-
-    const nyRoom: RoomDetails = {
-      navn: rom,
-      areal: arealNum,
-      kvalitet: kvalitetData.label,
-      breakdown: detaljertBreakdown,
-      totalKost: totalKostForRoom,
-      arbeidKost: totalArbeidKost,
-      materialKost: totalMaterialKost,
-      tidsEstimat: totalTid
-    };
-
-    setRomListe(prev => [...prev, nyRoom]);
-    setAreal("");
+      setRomListe(prev => [...prev, nyRoom]);
+      setAreal("");
+    } catch (error) {
+      console.error('Feil ved beregning av rom:', error);
+      alert('Det oppstod en feil ved beregning. Prøv igjen.');
+    }
   };
 
   // Fjern rom fra listen
@@ -257,11 +268,11 @@ export default function OppussingPremium() {
     setRomListe(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Kalkuler totaler
-  const totalKost = romListe.reduce((sum, r) => sum + r.totalKost, 0);
-  const totalArbeidKost = romListe.reduce((sum, r) => sum + r.arbeidKost, 0);
-  const totalMaterialKost = romListe.reduce((sum, r) => sum + r.materialKost, 0);
-  const totalTid = romListe.reduce((sum, r) => sum + r.tidsEstimat, 0);
+  // Kalkuler totaler - med sikker fallback
+  const totalKost = romListe.reduce((sum, r) => sum + (r.totalKost || 0), 0);
+  const totalArbeidKost = romListe.reduce((sum, r) => sum + (r.arbeidKost || 0), 0);
+  const totalMaterialKost = romListe.reduce((sum, r) => sum + (r.materialKost || 0), 0);
+  const totalTid = romListe.reduce((sum, r) => sum + (r.tidsEstimat || 0), 0);
   const totalMedBuffer = buffer ? Math.round(totalKost * 1.15) : totalKost;
 
   // ROI beregning
@@ -274,7 +285,9 @@ export default function OppussingPremium() {
   const formatBoligverdi = (value: string) => {
     const numValue = value.replace(/\s/g, '');
     if (numValue === '') return '';
-    return parseInt(numValue).toLocaleString('no-NO').replace(/,/g, ' ');
+    const parsed = parseInt(numValue);
+    if (isNaN(parsed)) return '';
+    return parsed.toLocaleString('no-NO').replace(/,/g, ' ');
   };
 
   const handleBoligverdiChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -284,22 +297,24 @@ export default function OppussingPremium() {
     }
   };
 
-  // Eksporter til PDF funksjon
+  // Eksporter til PDF funksjon - sikret mot deling på null
   const eksporterTilPDF = () => {
-    const content = `
+    try {
+      const totalKostSafe = totalKost || 1; // Unngå divisjon på null
+      const content = `
 PREMIUM OPPUSSINGSRAPPORT
 ==========================
 
 PROSJEKTOVERSIKT
-Region: ${regionMultipliers[region].name}
-Sesong: ${seasonMultipliers[sesong].name}
-Total areal: ${romListe.reduce((sum, r) => sum + r.areal, 0)} m²
+Region: ${regionMultipliers[region]?.name || 'Ukjent'}
+Sesong: ${seasonMultipliers[sesong]?.name || 'Ukjent'}
+Total areal: ${romListe.reduce((sum, r) => sum + (r.areal || 0), 0)} m²
 Estimert ferdigstillelse: ${calculateCompletionTime()} uker
 
 KOSTNADSANALYSE
 Total prosjektkostnad: ${totalMedBuffer.toLocaleString('no-NO')} kr
-- Arbeidskostnader: ${totalArbeidKost.toLocaleString('no-NO')} kr (${Math.round((totalArbeidKost/totalKost)*100)}%)
-- Materialkostnader: ${totalMaterialKost.toLocaleString('no-NO')} kr (${Math.round((totalMaterialKost/totalKost)*100)}%)
+- Arbeidskostnader: ${totalArbeidKost.toLocaleString('no-NO')} kr (${Math.round((totalArbeidKost/totalKostSafe)*100)}%)
+- Materialkostnader: ${totalMaterialKost.toLocaleString('no-NO')} kr (${Math.round((totalMaterialKost/totalKostSafe)*100)}%)
 ${buffer ? `- Buffer (15%): ${Math.round(totalKost * 0.15).toLocaleString('no-NO')} kr` : ''}
 
 ROI-ANALYSE
@@ -318,12 +333,17 @@ ${r.navn} (${r.areal} m², ${r.kvalitet})
 `).join('')}
     `;
     
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'oppussingsrapport-premium.txt';
-    a.click();
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'oppussingsrapport-premium.txt';
+      a.click();
+      URL.revokeObjectURL(url); // Rydd opp
+    } catch (error) {
+      console.error('Feil ved eksport:', error);
+      alert('Det oppstod en feil ved eksportering av rapporten.');
+    }
   };
 
   return (
@@ -545,7 +565,7 @@ ${r.navn} (${r.areal} m², ${r.kvalitet})
                     <div>
                       <span className="text-gray-600">Avkastning:</span>
                       <p className={`font-semibold ${nettoGevinst >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                        {((nettoGevinst / totalKost) * 100).toFixed(1)}%
+                        {totalKost > 0 ? ((nettoGevinst / totalKost) * 100).toFixed(1) : '0.0'}%
                       </p>
                     </div>
                   </div>
@@ -590,11 +610,11 @@ ${r.navn} (${r.areal} m², ${r.kvalitet})
                   <div className="grid grid-cols-2 gap-4 text-sm mb-4">
                     <div>
                       <span className="text-gray-600">Arbeidskostnader:</span>
-                      <p className="font-semibold">{totalArbeidKost.toLocaleString('no-NO')} kr ({Math.round((totalArbeidKost/totalKost)*100)}%)</p>
+                      <p className="font-semibold">{totalArbeidKost.toLocaleString('no-NO')} kr ({totalKost > 0 ? Math.round((totalArbeidKost/totalKost)*100) : 0}%)</p>
                     </div>
                     <div>
                       <span className="text-gray-600">Materialkostnader:</span>
-                      <p className="font-semibold">{totalMaterialKost.toLocaleString('no-NO')} kr ({Math.round((totalMaterialKost/totalKost)*100)}%)</p>
+                      <p className="font-semibold">{totalMaterialKost.toLocaleString('no-NO')} kr ({totalKost > 0 ? Math.round((totalMaterialKost/totalKost)*100) : 0}%)</p>
                     </div>
                     <div>
                       <span className="text-gray-600">Estimert arbeidstimer:</span>
