@@ -7,6 +7,13 @@ import { airbnbKorttidsleieData } from '../data/airbnbKorttidsleieData.js';
 const formatKr = (n: number) =>
   isNaN(n) ? "" : n.toLocaleString("no-NO", { style: "currency", currency: "NOK", maximumFractionDigits: 0 });
 
+// Hjelpefunksjon for å hente tall fra tekst (f.eks. "5000 kr" -> 5000)
+function extractNumber(text: string | undefined): number {
+  if (!text) return 0;
+  const numbers = text.replace(/[^\d]/g, '');
+  return numbers ? parseInt(numbers, 10) : 0;
+}
+
 function InfoTooltip({ text }: { text: string }) {
   return <span className="ml-1 cursor-pointer text-brown-400" title={text}>ⓘ</span>;
 }
@@ -62,9 +69,27 @@ export default function Utleiekalkulator() {
     if (!valgtBoligId) return;
     const bolig = boliger.find(b => b.id === valgtBoligId);
     if (!bolig) return;
-    setKjøpesum(Number(bolig.pris) || 0);
-    setFelleskostnader(Number(bolig.felleskostnader) || 0);
-    setAirbnbFelleskostnader(Number(bolig.felleskostnader) || 0);
+    
+    // Bruk extractNumber for å håndtere tekst med enheter
+    setKjøpesum(extractNumber(bolig.pris?.toString()) || 0);
+    setFelleskostnader(extractNumber(bolig.felleskostnader) || 0);
+    setAirbnbFelleskostnader(extractNumber(bolig.felleskostnader) || 0);
+    
+    // Kommunale avgifter - konverter fra årlig til månedlig hvis nødvendig
+    const kommunaleAvgÅr = extractNumber(bolig.kommunaleAvg) || 0;
+    const kommunaleAvgMnd = kommunaleAvgÅr > 500 ? Math.round(kommunaleAvgÅr / 12) : kommunaleAvgÅr;
+    setKommunaleAvgifter(kommunaleAvgMnd);
+    setAirbnbKommunaleAvgifter(kommunaleAvgMnd);
+    
+    console.log('Autofyll data:', {
+      pris: bolig.pris,
+      extractedPris: extractNumber(bolig.pris?.toString()),
+      felleskostnader: bolig.felleskostnader,
+      extractedFelleskostnader: extractNumber(bolig.felleskostnader),
+      kommunaleAvg: bolig.kommunaleAvg,
+      extractedKommunaleAvg: kommunaleAvgÅr
+    });
+    
     // Her kan du fylle inn mer hvis du lagrer flere tall i context
     // f.eks. setLeieinntekt(bolig.leieinntekt || 0);
     // Andre felt må fylles manuelt av bruker

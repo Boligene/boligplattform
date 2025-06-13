@@ -15,6 +15,8 @@ import BoligerDataExample from './pages/BoligerDataExample';
 import SjekklisteVisning from './pages/SjekklisteVisning';
 import SjekklisteForBoligkjop from './pages/SjekklisteForBoligkjop';
 import HjelpeverktoyForBoligkjopere from './pages/HjelpeverktoyForBoligkjopere';
+import RLSDemo from './pages/RLSDemo';
+import AuthCallback from './pages/AuthCallback';
 import LogoutButton from './components/LogoutButton';
 import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
@@ -47,6 +49,7 @@ function Header() {
         <Link to="/boliger" className="hover:text-brown-500 transition">Boliger</Link>
         <Link to="/kalkulatorer" className="hover:text-brown-500 transition">Kalkulatorer</Link>
         <Link to="/mineboliger" className="hover:text-brown-500 transition">Mine boliger</Link>
+        {user && <Link to="/rls-demo" className="hover:text-brown-500 transition">RLS Demo</Link>}
       </nav>
       {user ? (
         <LogoutButton />
@@ -79,10 +82,13 @@ const App: React.FC = () => {
         <Route path="/verdivurdering" element={<Verdivurdering />} />
         <Route path="/takstrapportanalyse" element={<TakstrapportAnalyse />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/auth" element={<Login />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/BoligerDataExample" element={<BoligerDataExample />} />
         <Route path="/sjekkliste-visning" element={<SjekklisteVisning />} />
         <Route path="/sjekkliste-for-boligkjop" element={<SjekklisteForBoligkjop />} />
         <Route path="/hjelpeverktoy-for-boligkjopere" element={<HjelpeverktoyForBoligkjopere />} />
+        <Route path="/rls-demo" element={<RLSDemo />} />
       </Routes>
     </>
   );

@@ -19,6 +19,13 @@ function Tooltip({ text }: { text: string }) {
 // Bruk én fast sats for strøm per m2 per år
 const stromprisPerM2Aar = 250; // kr per m2 per år (2024 gjennomsnitt)
 
+// Hjelpefunksjon for å hente tall fra tekst (f.eks. "5000 kr" -> 5000)
+function extractNumber(text: string | undefined): number {
+  if (!text) return 0;
+  const numbers = text.replace(/[^\d]/g, '');
+  return numbers ? parseInt(numbers, 10) : 0;
+}
+
 function enkelStromBeregning(areal: number): number {
   return Math.round((areal || 0) * stromprisPerM2Aar / 12);
 }
@@ -58,10 +65,11 @@ export default function Kjopskalkulator() {
   const [strom, setStrom] = useState<number>(0);
   const [stromManuelt, setStromManuelt] = useState<boolean>(false);
   const [kommunaleAvg, setKommunaleAvg] = useState<number>(0); // default 0 kr/år
-  const [andreOmkostninger, setAndreOmkostninger] = useState<number>(0); // engangskostnad
+  const [andreOmkostninger, setAndreOmkostninger] = useState<number>(0);
   const [andreUtgifter, setAndreUtgifter] = useState<number>(0);
   const [bruksareal, setBruksareal] = useState<number>(50); // default 50 kvm
   const [epost, setEpost] = useState<string>("");
+  const [nedbetalingstid, setNedbetalingstid] = useState<number>(25); // default 25 år
 
   const egenkapitalInfo = beregnEgenkapital(boligtype, prisantydning || 0, fellesgjeld || 0);
 
@@ -69,14 +77,44 @@ export default function Kjopskalkulator() {
     if (!valgtBoligId) return;
     const bolig = boliger.find(b => b.id === valgtBoligId);
     if (!bolig) return;
-    setPrisantydning(Number(bolig.pris) || undefined);
-    setFellesgjeld(Number(bolig.fellesgjeld) || Number(bolig.fellesgjeld) === 0 ? Number(bolig.fellesgjeld) : undefined);
-    setFelleskostnader(Number(bolig.felleskostnader) || 0);
-    setEiendomsskatt(Number(bolig.eiendomsskatt) || 0);
-    setBruksareal(Number(bolig.bruksareal) || 50);
-    setKommunaleAvg(Number(bolig.kommunaleAvg) || 0);
+    
+    // Bruk extractNumber for å håndtere tekst med enheter
+    setPrisantydning(extractNumber(bolig.pris?.toString()) || undefined);
+    
+    // Fellesgjeld (kan være 0 eller undefined for selveier)
+    const fgjeld = extractNumber(bolig.fellesgjeld);
+    setFellesgjeld(fgjeld || fgjeld === 0 ? fgjeld : undefined);
+    
+    setFelleskostnader(extractNumber(bolig.felleskostnader) || 0);
+    
+    // Eiendomsskatt - konverter fra årlig til månedlig hvis nødvendig
+    const eiendomsskattÅr = extractNumber(bolig.eiendomsskatt) || 0;
+    const eiendomsskattMnd = eiendomsskattÅr > 500 ? Math.round(eiendomsskattÅr / 12) : eiendomsskattÅr;
+    setEiendomsskatt(eiendomsskattMnd);
+    
+    // Bruksareal
+    setBruksareal(extractNumber(bolig.bruksareal) || 50);
+    
+    // Kommunale avgifter (årlig)
+    setKommunaleAvg(extractNumber(bolig.kommunaleAvg) || 0);
+    
+    console.log('Autofyll data:', {
+      pris: bolig.pris,
+      extractedPris: extractNumber(bolig.pris?.toString()),
+      fellesgjeld: bolig.fellesgjeld,
+      extractedFellesgjeld: fgjeld,
+      felleskostnader: bolig.felleskostnader,
+      extractedFelleskostnader: extractNumber(bolig.felleskostnader),
+      bruksareal: bolig.bruksareal,
+      extractedBruksareal: extractNumber(bolig.bruksareal),
+      kommunaleAvg: bolig.kommunaleAvg,
+      extractedKommunaleAvg: extractNumber(bolig.kommunaleAvg),
+      eiendomsskatt: bolig.eiendomsskatt,
+      extractedEiendomsskatt: eiendomsskattÅr
+    });
+    
     setStromManuelt(false);
-    setStrom(enkelStromBeregning(Number(bolig.bruksareal) || 50));
+    setStrom(enkelStromBeregning(extractNumber(bolig.bruksareal) || 50));
     setEgenkapitalManuelt(false);
   }, [valgtBoligId, boliger]);
 
@@ -110,7 +148,7 @@ export default function Kjopskalkulator() {
     andreOmkostninger;
 
   const [rente, setRente] = useState<number>(5.5); // 5,5% nominell
-  const nedbetaling = 25; // år
+  const nedbetaling = nedbetalingstid; // bruk valgt nedbetalingstid i stedet for fast 25 år
   const laan = prisantydning && egenkapital !== undefined ? prisantydning - egenkapital : 0;
   const mndRente = rente / 100 / 12;
   const terminer = nedbetaling * 12;
@@ -136,13 +174,15 @@ export default function Kjopskalkulator() {
     doc.text(`Prisantydning: ${prisantydning?.toLocaleString("no-NO")} kr`, 10, 40);
     if (boligtype !== "selveier") doc.text(`Fellesgjeld: ${fellesgjeld?.toLocaleString("no-NO")} kr`, 10, 50);
     doc.text(`Egenkapital: ${egenkapital?.toLocaleString("no-NO")} kr`, 10, 60);
-    doc.text(`Felleskostnader: ${felleskostnader.toLocaleString("no-NO")} kr/mnd`, 10, 70);
-    doc.text(`Tinglysingsgebyr hjemmel: ${tinglysningSkjote} kr`, 10, 80);
-    doc.text(`Tinglysingsgebyr pant: ${tinglysningPant} kr`, 10, 90);
-    if (boligtype === "selveier") doc.text(`Dokumentavgift: ${dokumentavgift.toLocaleString("no-NO")} kr`, 10, 100);
-    doc.text(`Samlet kjøpskostnad: ${totalKjopskost.toLocaleString("no-NO")} kr`, 10, 110);
-    doc.text(`Samlet egenkapitalbehov: ${egenkapitalInfo.belop.toLocaleString("no-NO")} kr`, 10, 120);
-    doc.text(`Månedskostnad: ${estimertMndTotalkost.toLocaleString("no-NO")} kr/mnd`, 10, 130);
+    doc.text(`Rente: ${rente}%`, 10, 70);
+    doc.text(`Nedbetalingstid: ${nedbetalingstid} år`, 10, 80);
+    doc.text(`Felleskostnader: ${felleskostnader.toLocaleString("no-NO")} kr/mnd`, 10, 90);
+    doc.text(`Tinglysingsgebyr hjemmel: ${tinglysningSkjote} kr`, 10, 100);
+    doc.text(`Tinglysingsgebyr pant: ${tinglysningPant} kr`, 10, 110);
+    if (boligtype === "selveier") doc.text(`Dokumentavgift: ${dokumentavgift.toLocaleString("no-NO")} kr`, 10, 120);
+    doc.text(`Samlet kjøpskostnad: ${totalKjopskost.toLocaleString("no-NO")} kr`, 10, 130);
+    doc.text(`Samlet egenkapitalbehov: ${egenkapitalInfo.belop.toLocaleString("no-NO")} kr`, 10, 140);
+    doc.text(`Månedskostnad: ${estimertMndTotalkost.toLocaleString("no-NO")} kr/mnd`, 10, 150);
     doc.save("kjopskalkyle.pdf");
   }
 
@@ -157,14 +197,16 @@ export default function Kjopskalkulator() {
     doc.text(`Prisantydning: ${prisantydning?.toLocaleString("no-NO")} kr`, 10, 40);
     if (boligtype !== "selveier") doc.text(`Fellesgjeld: ${fellesgjeld?.toLocaleString("no-NO")} kr`, 10, 50);
     doc.text(`Egenkapital: ${egenkapital?.toLocaleString("no-NO")} kr`, 10, 60);
-    doc.text(`Felleskostnader: ${felleskostnader.toLocaleString("no-NO")} kr/mnd`, 10, 70);
-    doc.text(`Tinglysingsgebyr hjemmel: ${tinglysningSkjote} kr`, 10, 80);
-    doc.text(`Tinglysingsgebyr pant: ${tinglysningPant} kr`, 10, 90);
-    if (boligtype === "selveier") doc.text(`Dokumentavgift: ${dokumentavgift.toLocaleString("no-NO")} kr`, 10, 100);
-    doc.text(`Andre omkostninger: ${andreOmkostninger.toLocaleString("no-NO")} kr`, 10, 105);
-    doc.text(`Samlet kjøpskostnad: ${totalKjopskost.toLocaleString("no-NO")} kr`, 10, 110);
-    doc.text(`Samlet egenkapitalbehov: ${egenkapitalInfo.belop.toLocaleString("no-NO")} kr`, 10, 120);
-    doc.text(`Månedskostnad: ${estimertMndTotalkost.toLocaleString("no-NO")} kr/mnd`, 10, 130);
+    doc.text(`Rente: ${rente}%`, 10, 70);
+    doc.text(`Nedbetalingstid: ${nedbetalingstid} år`, 10, 80);
+    doc.text(`Felleskostnader: ${felleskostnader.toLocaleString("no-NO")} kr/mnd`, 10, 90);
+    doc.text(`Tinglysingsgebyr hjemmel: ${tinglysningSkjote} kr`, 10, 100);
+    doc.text(`Tinglysingsgebyr pant: ${tinglysningPant} kr`, 10, 110);
+    if (boligtype === "selveier") doc.text(`Dokumentavgift: ${dokumentavgift.toLocaleString("no-NO")} kr`, 10, 120);
+    doc.text(`Andre omkostninger: ${andreOmkostninger.toLocaleString("no-NO")} kr`, 10, 130);
+    doc.text(`Samlet kjøpskostnad: ${totalKjopskost.toLocaleString("no-NO")} kr`, 10, 140);
+    doc.text(`Samlet egenkapitalbehov: ${egenkapitalInfo.belop.toLocaleString("no-NO")} kr`, 10, 150);
+    doc.text(`Månedskostnad: ${estimertMndTotalkost.toLocaleString("no-NO")} kr/mnd`, 10, 160);
     // Lag Blob
     const pdfBlob = doc.output("blob");
     // Send til backend
@@ -387,6 +429,14 @@ export default function Kjopskalkulator() {
             value={rente}
             setValue={setRente}
           />
+          <SliderInput
+            label={<span>Nedbetalingstid (år) <Tooltip text="Antall år du ønsker å nedbetale lånet." /></span>}
+            min={1}
+            max={30}
+            step={1}
+            value={nedbetalingstid}
+            setValue={setNedbetalingstid}
+          />
         </form>
         <div className="w-full text-brown-900 font-bold text-xl text-center mb-2">
           Totale kjøpskostnader: {prisantydning || fellesgjeld ? totalKjopskost.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr" : "—"}
@@ -404,7 +454,7 @@ export default function Kjopskalkulator() {
           <div className="text-brown-900 font-bold text-lg mb-1">Du må betale dette hver måned:</div>
           <div className="text-2xl font-seriflogo text-green-800 mb-2">{estimertMndTotalkost > 0 ? estimertMndTotalkost.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr/mnd" : "—"}</div>
           <ul className="text-brown-800 text-sm grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-left max-w-xl mx-auto">
-            <li>Lånekostnad: {terminbelop > 0 ? terminbelop.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr" : "—"} <Tooltip text="Lånekostnad er beregnet med annuitetslån, valgt rente og 25 års nedbetalingstid. Formelen: (lån * mndRente) / (1 - (1 + mndRente)^-terminer)." /></li>
+            <li>Lånekostnad: {terminbelop > 0 ? terminbelop.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr" : "—"} <Tooltip text="Lånekostnad er beregnet med annuitetslån, valgt rente og valgt nedbetalingstid. Formelen: (lån * mndRente) / (1 - (1 + mndRente)^-terminer)." /></li>
             <li>Felleskostnader: {felles > 0 ? felles.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr" : "—"}</li>
             <li>Forsikring: {mndForsikring > 0 ? mndForsikring.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr" : "—"}</li>
             <li>Termingebyr: {mndTermingebyr > 0 ? mndTermingebyr.toLocaleString("no-NO", {maximumFractionDigits: 0}) + " kr" : "—"}</li>

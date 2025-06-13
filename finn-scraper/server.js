@@ -35,7 +35,7 @@ app.post("/api/parse-finn", async (req, res) => {
     const tittel = await page.$eval('[data-testid="object-title"]', el => el.textContent.trim()).catch(() => '');
     const bilde = await page.$eval('meta[property="og:image"]', el => el.content).catch(() => '');
 
-    // Nye felter
+    // Nye felter - prøv flere mulige selektorer
     const bruksareal = await page.$eval('[data-testid="info-usable-area"]', el => el.textContent.trim()).catch(() => '');
     const eierform = await page.$eval('[data-testid="info-ownership-type"]', el => el.textContent.trim()).catch(() => '');
     const byggeaar = await page.$eval('[data-testid="info-construction-year"]', el => el.textContent.trim()).catch(() => '');
@@ -43,10 +43,34 @@ app.post("/api/parse-finn", async (req, res) => {
     const eiendomsskatt = await page.$eval('[data-testid="pricing-estate-tax"]', el => el.textContent.trim()).catch(() => '');
     const felleskostnader = await page.$eval('[data-testid="pricing-common-monthly-cost"]', el => el.textContent.trim()).catch(() => '');
     const boligtype = await page.$eval('[data-testid="info-property-type"]', el => el.textContent.trim()).catch(() => '');
+    
+    // Prøv flere mulige selektorer for fellesgjeld
+    let fellesgjeld = '';
+    try {
+      fellesgjeld = await page.$eval('[data-testid="pricing-shared-debt"]', el => el.textContent.trim());
+    } catch {
+      try {
+        // Prøv alternativ måte - se etter tekst som inneholder "Fellesgjeld"
+        fellesgjeld = await page.evaluate(() => {
+          const elements = Array.from(document.querySelectorAll('*'));
+          for (const el of elements) {
+            if (el.textContent && el.textContent.includes('Fellesgjeld') && el.nextElementSibling) {
+              const nextText = el.nextElementSibling.textContent;
+              if (nextText && /\d/.test(nextText)) {
+                return nextText.trim();
+              }
+            }
+          }
+          return '';
+        });
+      } catch {
+        fellesgjeld = '';
+      }
+    }
 
     await browser.close();
 
-    return res.json({
+    const resultData = {
       adresse,
       pris,
       tittel,
@@ -57,8 +81,13 @@ app.post("/api/parse-finn", async (req, res) => {
       kommunaleAvg,
       eiendomsskatt,
       felleskostnader,
-      boligtype
-    });
+      boligtype,
+      fellesgjeld
+    };
+    
+    console.log('Scraped data:', resultData);
+    
+    return res.json(resultData);
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: "Noe gikk galt under scraping." });
@@ -151,7 +180,7 @@ app.get("/api/ping", (req, res) => {
   res.json({ status: "ok" });
 });
 
-const PORT = 5000;
+const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Express-server kjører på http://localhost:${PORT}`);
 });
