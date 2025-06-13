@@ -115,30 +115,7 @@ Denne guiden hjelper deg med å konfigurere alle social login-providerne for din
 
 ---
 
-## ⚫ **5. GitHub Setup**
-
-### **Steg 1: GitHub Developer Settings**
-1. Gå til [GitHub Developer Settings](https://github.com/settings/developers)
-2. **OAuth Apps** → **New OAuth App**
-
-### **Steg 2: Konfigurer OAuth App**
-- **Application name:** `Boligene Auth`
-- **Homepage URL:** `https://ixqtnqvmkdcjqvpvgzpx.supabase.co`
-- **Authorization callback URL:** `https://ixqtnqvmkdcjqvpvgzpx.supabase.co/auth/v1/callback`
-
-### **Steg 3: Generer Client Secret**
-1. Klikk **Generate a new client secret**
-2. Kopier **Client ID** og **Client Secret**
-
-### **Steg 4: Supabase Dashboard**
-1. Aktiver **GitHub** provider
-2. Fyll inn:
-   - **Client ID:** `[GITHUB CLIENT ID]`
-   - **Client Secret:** `[GITHUB CLIENT SECRET]`
-
----
-
-## ✅ **6. Testing**
+## ✅ **5. Testing**
 
 ### **Test hver provider:**
 1. Gå til `http://localhost:5173/auth`
@@ -153,7 +130,7 @@ Denne guiden hjelper deg med å konfigurere alle social login-providerne for din
 
 ---
 
-## 🔧 **7. Produksjon**
+## 🔧 **6. Produksjon**
 
 Når du deployer til produksjon, husk å:
 1. Oppdatere alle callback URLs til ditt produksjonsdomene
@@ -162,7 +139,7 @@ Når du deployer til produksjon, husk å:
 
 ---
 
-## 📞 **Support**
+## 📞 **7. Support**
 
 Hvis du trenger hjelp:
 1. Sjekk Supabase Auth logs i Dashboard

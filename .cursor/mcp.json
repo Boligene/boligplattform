@@ -8,6 +8,16 @@
         "--access-token",
         "sbp_078184b8d4da96f40ee8c7162657944a7bf973bb"
       ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github@latest"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "DIN_GITHUB_TOKEN_HER"
+      }
     }
   }
 } 

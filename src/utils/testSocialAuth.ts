@@ -8,7 +8,7 @@ export interface AuthProviderStatus {
 }
 
 export const testSocialAuthProviders = async (): Promise<AuthProviderStatus[]> => {
-  const providers = ['google', 'apple', 'azure', 'facebook', 'github'] as const;
+  const providers = ['google', 'apple', 'azure', 'facebook'] as const;
   const results: AuthProviderStatus[] = [];
 
   for (const provider of providers) {
