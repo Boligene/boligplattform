@@ -1,0 +1,58 @@
+{
+  "project": {
+    "name": "boligplattform-frontend",
+    "description": "Boligplattform frontend - A comprehensive real estate platform with property search, comparison tools, calculators, and AI-powered analysis",
+    "version": "0.0.1",
+    "type": "React/TypeScript frontend",
+    "repository": "https://github.com/Boligene/boligplattform.git"
+  },
+  "features": {
+    "completed": [
+      "FINN integration for property data scraping",
+      "Property comparison (side-by-side)",
+      "Property valuation tool (address/postal code + sqm + SSB data)",
+      "AI-powered property appraisal analysis (PDF/text upload)"
+    ],
+    "in_progress": [
+      "Purchase calculator",
+      "Renovation calculator",
+      "Rental calculator"
+    ],
+    "planned": [
+      "User authentication & profiles",
+      "Bidding round tools",
+      "Viewing checklist",
+      "Property purchase checklist",
+      "Personal purchase planner",
+      "Property alerts/notifications"
+    ]
+  },
+  "tech_stack": {
+    "frontend": [
+      "React 18.3.1",
+      "TypeScript 4.9.5",
+      "Vite 4.0.0",
+      "Tailwind CSS 3.0.0"
+    ],
+    "integrations": [
+      "Supabase 2.49.9",
+      "React Router Dom 6.30.1",
+      "Recharts 2.15.3",
+      "Puppeteer 24.9.0 (for scraping)",
+      "jsPDF 3.0.1"
+    ],
+    "development": [
+      "Express 5.1.0",
+      "PostCSS 8.4.0",
+      "Autoprefixer 10.4.0"
+    ]
+  },
+  "github_mcp": {
+    "enabled": true,
+    "auto_sync": true,
+    "branch_protection": ["main", "develop"],
+    "pr_templates": true,
+    "issue_templates": true,
+    "automated_testing": true
+  }
+} 
