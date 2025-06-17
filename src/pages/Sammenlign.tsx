@@ -1,6 +1,5 @@
-import React from "react";
-import { useBolig } from "../context/BoligContext";
 import { Link } from "react-router-dom";
+import { useBolig } from "../context/BoligContext";
 
 // REALISTISKE STANDARDER (kan tilpasses)
 const DEFAULT_KVM = 70;                  // Gjett default hvis ukjent
@@ -79,10 +78,11 @@ export default function Sammenlign() {
               </tr>
             </thead>
             <tbody className="text-brown-900">
+              {/* Grunnleggende info */}
               <tr>
-                <td className="p-3 font-semibold">Adresse/navn</td>
+                <td className="p-3 font-semibold">Adresse</td>
                 {sammenlignBoliger.map((b: any) => (
-                  <td className="p-3" key={b.id}>{b.adresse || b.tittel || "-"}</td>
+                  <td className="p-3" key={b.id}>{b.adresse || "-"}</td>
                 ))}
               </tr>
               <tr>
@@ -92,18 +92,72 @@ export default function Sammenlign() {
                 ))}
               </tr>
               <tr>
-                <td className="p-3 font-semibold">Størrelse (kvm)</td>
+                <td className="p-3 font-semibold">Boligtype</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.type || "-"}</td>
+                ))}
+              </tr>
+              
+              {/* Areal og rom */}
+              <tr>
+                <td className="p-3 font-semibold">Bruksareal</td>
                 {sammenlignBoliger.map((b: any) => (
                   <td className="p-3" key={b.id}>
-                    {b.bruksareal || b.kvm ? (b.bruksareal || b.kvm) + " kvm" : <span className="text-brown-400">Ikke tilgjengelig</span>}
+                    {b.bruksareal || b.kvm ? (b.bruksareal || b.kvm) + " m²" : <span className="text-brown-400">Ikke oppgitt</span>}
                   </td>
                 ))}
               </tr>
               <tr>
+                <td className="p-3 font-semibold">Antall rom</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.antallRom || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Soverom</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.antallSoverom || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              
+              {/* Bygningsinfo */}
+              <tr>
+                <td className="p-3 font-semibold">Byggeår</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.byggeaar || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Energimerking</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>
+                    {b.energimerking ? (
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        b.energimerking === 'A' ? 'bg-green-100 text-green-800' :
+                        b.energimerking === 'B' ? 'bg-green-100 text-green-700' :
+                        b.energimerking === 'C' ? 'bg-yellow-100 text-yellow-700' :
+                        b.energimerking === 'D' ? 'bg-orange-100 text-orange-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {b.energimerking}
+                      </span>
+                    ) : <span className="text-brown-400">Ikke oppgitt</span>}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Eierform</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.eierform || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              
+              {/* Økonomiske forhold */}
+              <tr>
                 <td className="p-3 font-semibold">Felleskostnader</td>
                 {sammenlignBoliger.map((b: any) => (
                   <td className="p-3" key={b.id}>
-                    {b.felleskostnader ? b.felleskostnader.toLocaleString("no-NO") + " kr/mnd" : <span className="text-brown-400">Ikke oppgitt</span>}
+                    {b.felleskostnader ? b.felleskostnader + " kr/mnd" : <span className="text-brown-400">Ikke oppgitt</span>}
                   </td>
                 ))}
               </tr>
@@ -111,43 +165,99 @@ export default function Sammenlign() {
                 <td className="p-3 font-semibold">Kommunale avgifter</td>
                 {sammenlignBoliger.map((b: any) => (
                   <td className="p-3" key={b.id}>
-                    {b.kommunaleAvg ? b.kommunaleAvg.toLocaleString("no-NO") + " kr/mnd" : <span className="text-brown-400">Ikke oppgitt</span>}
+                    {b.kommunaleAvg ? b.kommunaleAvg + " kr/år" : <span className="text-brown-400">Ikke oppgitt</span>}
                   </td>
                 ))}
               </tr>
               <tr>
-                <td className="p-3 font-semibold">Boligtype</td>
+                <td className="p-3 font-semibold">Eiendomsskatt</td>
                 {sammenlignBoliger.map((b: any) => (
-                  <td className="p-3" key={b.id}>{b.type || "-"}</td>
+                  <td className="p-3" key={b.id}>
+                    {b.eiendomsskatt ? b.eiendomsskatt + " kr/år" : <span className="text-brown-400">Ikke oppgitt</span>}
+                  </td>
                 ))}
               </tr>
               <tr>
-                <td className="p-3 font-semibold">Primærrom/BRA/P-rom</td>
+                <td className="p-3 font-semibold">Fellesgjeld</td>
                 {sammenlignBoliger.map((b: any) => (
-                  <td className="p-3" key={b.id}>{b.primarrom || b.BRA || b.prom || "-"}</td>
+                  <td className="p-3" key={b.id}>
+                    {b.fellesgjeld ? b.fellesgjeld + " kr" : <span className="text-brown-400">Ikke oppgitt</span>}
+                  </td>
                 ))}
               </tr>
               <tr>
+                <td className="p-3 font-semibold">Pris per m²</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>
+                    {b.prisPerKvm ? b.prisPerKvm : <span className="text-brown-400">Ikke oppgitt</span>}
+                  </td>
+                ))}
+              </tr>
+              
+              {/* Fasiliteter */}
+              <tr>
+                <td className="p-3 font-semibold">Parkering</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.parkering || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Balkong/Terrasse</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>
+                    {b.balkong || b.terrasse ? (b.balkong || b.terrasse) : <span className="text-brown-400">Ikke oppgitt</span>}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Hage</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.hage || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              
+              {/* Beliggenhet */}
+              <tr>
+                <td className="p-3 font-semibold">Kommune</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.kommune || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Bydel</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.bydel || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              
+              {/* Salgsinfo */}
+              <tr>
+                <td className="p-3 font-semibold">Megler</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.megler || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-3 font-semibold">Visningsdato</td>
+                {sammenlignBoliger.map((b: any) => (
+                  <td className="p-3" key={b.id}>{b.visningsdato || <span className="text-brown-400">Ikke oppgitt</span>}</td>
+                ))}
+              </tr>
+              
+              {/* Kalkulert kostnad */}
+              <tr className="bg-brown-50">
                 <td className="p-3 font-semibold">Kalkulert total månedskostnad</td>
                 {sammenlignBoliger.map((b: any) => {
                   const kost = kalkulerTotalKostnad(b);
                   return (
                     <td className={`p-3 font-bold ${kostFarge(kost.total)}`} key={b.id}>
                       {kost.total.toLocaleString("no-NO")} kr/mnd
-                      <div className="text-xs text-brown-400">
+                      <div className="text-xs text-brown-400 font-normal">
                         (Lån: {kost.laan.toLocaleString()} + strøm: {kost.strøm.toLocaleString()} + komm.avg: {kost.kommunale.toLocaleString()} + felles: {kost.felles.toLocaleString()})
                       </div>
                     </td>
                   );
                 })}
-              </tr>
-              <tr>
-                <td className="p-3 font-semibold">Oppussingsbehov</td>
-                {sammenlignBoliger.map((b: any) => (
-                  <td className="p-3" key={b.id}>
-                    <span className="italic text-brown-400">Ikke tilgjengelig</span>
-                  </td>
-                ))}
               </tr>
             </tbody>
           </table>

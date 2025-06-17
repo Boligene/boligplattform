@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState } from "react";
 
-// Oppdatert Bolig-type med nye felter
+// Oppdatert Bolig-type med alle nye felter fra oppgradert scraper
 export type Bolig = {
   id: string;
   adresse: string;
@@ -11,13 +11,47 @@ export type Bolig = {
   bilde: string;
   lenke: string;
   tittel?: string;
+  
+  // Grunnleggende boligdata
   bruksareal?: string;
+  primaerareal?: string;
+  totalareal?: string;
+  antallRom?: string;
+  antallSoverom?: string;
+  etasje?: string;
   eierform?: string;
   byggeaar?: string;
+  energimerking?: string;
+  
+  // Økonomiske data
   kommunaleAvg?: string;
   eiendomsskatt?: string;
   felleskostnader?: string;
   fellesgjeld?: string;
+  prisPerKvm?: string;
+  formuesverdi?: string;
+  
+  // Fasiliteter
+  parkering?: string;
+  balkong?: string;
+  terrasse?: string;
+  hage?: string;
+  kjeller?: string;
+  oppvarming?: string;
+  
+  // Beliggenhet
+  kommune?: string;
+  bydel?: string;
+  postnummer?: string;
+  
+  // Salgsinfo
+  megler?: string;
+  visningsdato?: string;
+  budfrister?: string;
+  
+  // Tilleggsdata
+  beskrivelse?: string;
+  bilder?: string[];
 };
 
 type BoligContextType = {

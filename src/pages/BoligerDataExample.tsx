@@ -1,15 +1,8 @@
 import * as React from 'react';
 import { supabase } from '../supabaseClient';
+import { Tables } from '../types/database.types';
 
-interface Bolig {
-  id: string;
-  adresse: string;
-  pris: number;
-  type: string;
-  bilde: string;
-  lenke: string;
-  opprettet: string;
-}
+type Bolig = Tables<'boliger'>;
 
 const BoligerDataExample: React.FC = () => {
   const [boliger, setBoliger] = React.useState<Bolig[]>([]);
@@ -43,8 +36,25 @@ const BoligerDataExample: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    
+    // Get current user for bruker_id
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setError('Du må være logget inn for å legge til boliger');
+      setLoading(false);
+      return;
+    }
+
     const { error } = await supabase.from('boliger').insert([
-      { adresse, pris, type, bilde, lenke }
+      { 
+        adresse, 
+        pris, 
+        type, 
+        bilde, 
+        lenke,
+        bruker_id: user.id,
+        tittel: adresse // Use address as title if not provided
+      }
     ]);
     if (error) setError(error.message);
     else {
@@ -73,10 +83,10 @@ const BoligerDataExample: React.FC = () => {
             {bolig.bilde && <img src={bolig.bilde} alt="bilde" className="w-24 h-16 object-cover rounded" />}
             <div className="flex-1">
               <div className="font-semibold">{bolig.adresse}</div>
-              <div>{bolig.type} | {bolig.pris.toLocaleString()} kr</div>
+              <div>{bolig.type} | {bolig.pris?.toLocaleString()} kr</div>
               {bolig.lenke && <a href={bolig.lenke} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">Se annonse</a>}
             </div>
-            <div className="text-xs text-gray-500">{new Date(bolig.opprettet).toLocaleString()}</div>
+            <div className="text-xs text-gray-500">{bolig.opprettet && new Date(bolig.opprettet).toLocaleString()}</div>
           </li>
         ))}
       </ul>

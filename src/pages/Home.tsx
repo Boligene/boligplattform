@@ -1,9 +1,9 @@
+import { ArrowRight, Calculator, Check, FileText, Hammer, HelpCircle, Home, Star, Trash2 } from "lucide-react";
 import * as React from "react";
-import { useBolig } from "../context/BoligContext";
-import { Home, Hammer, Calculator, Star, ArrowRight, Trash2, Check, FileText, HelpCircle } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import { supabase } from '../supabaseClient';
 import { useEffect, useState } from 'react';
+import { Link, useNavigate } from "react-router-dom";
+import { useBolig } from "../context/BoligContext";
+import { supabase } from '../supabaseClient';
 
 // Hjelpefunksjon for lagring i localStorage
 function lagreBoligerLokalt(boliger: any[]) {
@@ -87,7 +87,7 @@ export default function HomePage() {
     }
     setLaster(true);
     try {
-      const response = await fetch("/api/parse-finn", {
+      const response = await fetch("http://localhost:3001/api/parse-finn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: finnUrl })
@@ -100,21 +100,45 @@ export default function HomePage() {
         return;
       }
 
-      // NY: LAGRE ALLE FELTENE DU SCRAPER
+      // OPPDATERT: LAGRE ALLE DE NYE OMFATTENDE FELTENE
       const nyBolig = {
         id: Date.now().toString(),
         adresse: data.adresse || "Ukjent",
         pris: Number(data.pris?.replace(/[^\d]/g, "")) || 0,
-        type: data.boligtype || "Leilighet",
-        bilde: data.bilde || "",
-        bruksareal: data.bruksareal || "",
+        type: data.boligtype || data.type || "Leilighet",
+        bilde: data.hovedbilde || data.bilde || "",
+        bruksareal: data.bruksareal || data.areal || "",
         eierform: data.eierform || "",
         byggeaar: data.byggeaar || "",
-        kommunaleAvg: data.kommunaleAvg || "",
+        kommunaleAvg: data.kommunaleAvg || data.kommunaleavgifter || "",
         eiendomsskatt: data.eiendomsskatt || "",
         felleskostnader: data.felleskostnader || "",
+        fellesgjeld: data.fellesgjeld || "",
         tittel: data.tittel || "",
-        lenke: finnUrl
+        lenke: finnUrl,
+        // Nye felter fra den oppgraderte scraperen
+        primaerareal: data.primaerareal || "",
+        totalareal: data.totalareal || "",
+        antallRom: data.antallRom || "",
+        antallSoverom: data.antallSoverom || "",
+        etasje: data.etasje || "",
+        energimerking: data.energimerking || "",
+        parkering: data.parkering || "",
+        balkong: data.balkong || "",
+        terrasse: data.terrasse || "",
+        hage: data.hage || "",
+        kjeller: data.kjeller || "",
+        oppvarming: data.oppvarming || "",
+        kommune: data.kommune || "",
+        bydel: data.bydel || "",
+        postnummer: data.postnummer || "",
+        megler: data.megler || "",
+        visningsdato: data.visningsdato || "",
+        budfrister: data.budfrister || "",
+        beskrivelse: data.beskrivelse || "",
+        bilder: data.bilder || [],
+        prisPerKvm: data.prisPerKvm || "",
+        formuesverdi: data.formuesverdi || ""
       };
       addBolig(nyBolig);
       setFinnUrl("");
@@ -195,6 +219,15 @@ export default function HomePage() {
               {feilmelding}
             </div>
           )}
+
+          <div className="flex gap-4 w-full max-w-md">
+            <Link 
+              to="/boliger" 
+              className="flex-1 rounded-full px-6 py-3 bg-brown-200 text-brown-800 font-semibold text-lg hover:bg-brown-300 transition text-center"
+            >
+              Legg til bolig manuelt
+            </Link>
+          </div>
 
           {boliger.length > 0 && (
             <div className="w-full mt-4">

@@ -1,24 +1,25 @@
-import Sammenlign from "./pages/Sammenlign";
-import { Routes, Route, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, Route, Routes } from 'react-router-dom';
+import LogoutButton from './components/LogoutButton';
+import AIBoligassistentPage from './pages/AIBoligassistent';
+import AuthCallback from './pages/AuthCallback';
+import Boliger from './pages/Boliger';
+import BoligerDataExample from './pages/BoligerDataExample';
+import HjelpeverktoyForBoligkjopere from './pages/HjelpeverktoyForBoligkjopere';
 import Home from './pages/Home';
 import Kalkulatorer from "./pages/Kalkulatorer";
+import Kjopskalkulator from "./pages/Kjopskalkulator";
+import Login from './pages/Login';
 import MineBoliger from './pages/MineBoliger';
-import Boliger from './pages/Boliger';
 import Oppussing from './pages/Oppussing';
 import OppussingPremium from './pages/OppussingPremium';
-import Utleiekalkulator from "./pages/Utleiekalkulator";
-import Kjopskalkulator from "./pages/Kjopskalkulator";
-import Verdivurdering from './pages/Verdivurdering';
-import TakstrapportAnalyse from "./pages/TakstrapportAnalyse";
-import Login from './pages/Login';
-import BoligerDataExample from './pages/BoligerDataExample';
-import SjekklisteVisning from './pages/SjekklisteVisning';
+
+import Sammenlign from "./pages/Sammenlign";
 import SjekklisteForBoligkjop from './pages/SjekklisteForBoligkjop';
-import HjelpeverktoyForBoligkjopere from './pages/HjelpeverktoyForBoligkjopere';
-import RLSDemo from './pages/RLSDemo';
-import AuthCallback from './pages/AuthCallback';
-import LogoutButton from './components/LogoutButton';
-import { useEffect, useState } from 'react';
+import SjekklisteVisning from './pages/SjekklisteVisning';
+import TakstrapportAnalyse from "./pages/TakstrapportAnalyse";
+import Utleiekalkulator from "./pages/Utleiekalkulator";
+import Verdivurdering from './pages/Verdivurdering';
 import { supabase } from './supabaseClient';
 
 // Header-komponent
@@ -47,9 +48,10 @@ function Header() {
       <nav className="flex flex-wrap justify-center gap-4 font-medium text-brown-800 w-full sm:w-auto">
         <Link to="/" className="hover:text-brown-500 transition">Hjem</Link>
         <Link to="/boliger" className="hover:text-brown-500 transition">Boliger</Link>
+        <Link to="/ai-boligassistent" className="hover:text-brown-500 transition">AI-Assistent</Link>
         <Link to="/kalkulatorer" className="hover:text-brown-500 transition">Kalkulatorer</Link>
         <Link to="/mineboliger" className="hover:text-brown-500 transition">Mine boliger</Link>
-        {user && <Link to="/rls-demo" className="hover:text-brown-500 transition">RLS Demo</Link>}
+        
       </nav>
       {user ? (
         <LogoutButton />
@@ -71,6 +73,7 @@ const App: React.FC = () => {
       <Header />
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/ai-boligassistent" element={<AIBoligassistentPage />} />
         <Route path="/kalkulatorer" element={<Kalkulatorer />} />
         <Route path="/kjopskalkulator" element={<Kjopskalkulator />} />
         <Route path="/utleiekalkulator" element={<Utleiekalkulator />} />
@@ -88,7 +91,7 @@ const App: React.FC = () => {
         <Route path="/sjekkliste-visning" element={<SjekklisteVisning />} />
         <Route path="/sjekkliste-for-boligkjop" element={<SjekklisteForBoligkjop />} />
         <Route path="/hjelpeverktoy-for-boligkjopere" element={<HjelpeverktoyForBoligkjopere />} />
-        <Route path="/rls-demo" element={<RLSDemo />} />
+        
       </Routes>
     </>
   );
