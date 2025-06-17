@@ -1,0 +1,44 @@
+[
+  {
+    "område": "Oslo",
+    "boligtype": "Leilighet",
+    "pris": 105000,
+    "år": "2023",
+    "kvartal": "4"
+  },
+  {
+    "område": "Oslo",
+    "boligtype": "Enebolig",
+    "pris": 90000,
+    "år": "2023",
+    "kvartal": "4"
+  },
+  {
+    "område": "Oslo",
+    "boligtype": "Rekkehus",
+    "pris": 95000,
+    "år": "2023",
+    "kvartal": "4"
+  },
+  {
+    "område": "Hele landet",
+    "boligtype": "Leilighet",
+    "pris": 85000,
+    "år": "2023",
+    "kvartal": "4"
+  },
+  {
+    "område": "Hele landet",
+    "boligtype": "Enebolig",
+    "pris": 67000,
+    "år": "2023",
+    "kvartal": "4"
+  },
+  {
+    "område": "Hele landet",
+    "boligtype": "Rekkehus",
+    "pris": 70000,
+    "år": "2023",
+    "kvartal": "4"
+  }
+] 

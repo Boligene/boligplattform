@@ -1,0 +1,46 @@
+.
+├── AI_BOLIGASSISTENT_GUIDE.md
+├── finn-scraper
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── server.js
+│   └── uploads
+├── GITHUB_MCP_SETUP.md
+├── index.html
+├── mcp-config.json
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── public
+│   ├── bg-livingroom.png
+│   └── bolig.json
+├── QUICK_START_MCP.md
+├── README.md
+├── roadmap.md
+├── SALGSOPPGAVE_ANALYSE_UPGRADE.md
+├── scripts
+│   ├── mcp-status.js
+│   └── mcp-sync.js
+├── setup-social-auth.md
+├── src
+│   ├── App.tsx
+│   ├── components
+│   ├── context
+│   ├── data
+│   ├── index.css
+│   ├── main.tsx
+│   ├── pages
+│   ├── services
+│   ├── src
+│   ├── supabaseClient.ts
+│   ├── types
+│   ├── utils
+│   └── vite-env.d.ts
+├── structure.txt
+├── tailwind.config.js
+├── TEST_RAPPORT.md
+├── tsconfig.json
+├── vercel.json
+└── vite.config.ts
+
+14 directories, 30 files
