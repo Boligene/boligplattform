@@ -1,6 +1,6 @@
+import { CheckSquare, DollarSign, Home } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { Home, Calculator, CheckSquare, TrendingUp, FileText, DollarSign } from 'lucide-react';
 
 const HjelpeverktoyForBoligkjopere: React.FC = () => {
   return (

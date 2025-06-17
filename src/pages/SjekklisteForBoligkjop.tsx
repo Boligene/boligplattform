@@ -1,6 +1,6 @@
+import { AlertCircle, Building, Calculator, CheckCircle, ChevronDown, ChevronRight, ChevronUp, DollarSign, FileText, Plus, RotateCcw, TrendingUp, Users, Wrench } from 'lucide-react';
 import * as React from 'react';
 import { useState } from 'react';
-import { CheckCircle, AlertCircle, Calculator, TrendingUp, FileText, DollarSign, Home, Users, ChevronRight, ChevronDown, ChevronUp, Shield, Wrench, Building, Plus, RotateCcw } from 'lucide-react';
 
 interface BudSimulation {
   startpris: number;
@@ -461,13 +461,13 @@ const SjekklisteForBoligkjop: React.FC = () => {
     }
     
     // Smart auto-forslag basert på situasjon
-    if (motpartBud) {
+    if (status === 'utkonkurrert' && motpartBud) {
+      setCurrentBud(motpartBud + 25000);
+    } else if (motpartBud) {
       const diff = motpartBud - currentBud;
       const marketMultiplier = marketPressure === 'ekstrem' ? 1.5 : marketPressure === 'høy' ? 1.2 : 1.0;
       const smartIncrement = Math.round((diff < 100000 ? 25000 : diff < 200000 ? 50000 : 75000) * marketMultiplier);
       setCurrentBud(motpartBud + smartIncrement);
-    } else if (status === 'utkonkurrert' && motpartBud) {
-      setCurrentBud(motpartBud + 25000);
     } else if (status === 'avslått' && currentBud < budSimulation.startpris * 1.1) {
       setCurrentBud(Math.round(currentBud * 1.08));
     }

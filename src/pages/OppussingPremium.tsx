@@ -19,27 +19,26 @@
   - Riktig balanse mellom kvalitet og realistiske priser
 */
 
-import { useState } from "react";
-import { 
-  Hammer, 
-  Paintbrush, 
-  Bath, 
-  BedDouble, 
-  Sofa, 
-  DoorOpen, 
-  Info, 
-  MapPin, 
-  Calendar, 
-  TrendingUp, 
-  Calculator,
-  Download,
-  Star,
-  Clock,
-  Users,
-  Award,
-  Zap,
-  Target
+import {
+    Award,
+    Bath,
+    BedDouble,
+    Calendar,
+    Clock,
+    DoorOpen,
+    Download,
+    Hammer,
+    Info,
+    MapPin,
+    Paintbrush,
+    Sofa,
+    Star,
+    Target,
+    TrendingUp,
+    Users,
+    Zap
 } from "lucide-react";
+import React, { useState } from "react";
 
 // Typer for bedre TypeScript-støtte
 interface RegionData {

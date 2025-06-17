@@ -12,8 +12,8 @@
   Prisene under er avrundet og tilpasset totaloppussing av middels standard.
 */
 
+import { Bath, BedDouble, DoorOpen, Hammer, Info, Paintbrush, Sofa, Star } from "lucide-react";
 import React, { useState } from "react";
-import { Hammer, Paintbrush, Bath, BedDouble, Sofa, DoorOpen, Info, Star } from "lucide-react";
 
 const romIkoner: Record<string, React.ReactNode> = {
   "Kjøkken": <Hammer className="inline w-5 h-5 mr-1 text-brown-700" />, // Hammer for kjøkken
@@ -76,7 +76,9 @@ export default function Oppussing() {
         if (Array.isArray(parsed)) {
           setRomListe(parsed);
         }
-      } catch {}
+      } catch (error) {
+        // Ignore parsing errors for invalid localStorage data
+      }
     }
   };
 
