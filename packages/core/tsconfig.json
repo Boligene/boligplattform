@@ -8,6 +8,6 @@
     "declarationMap": true,
     "allowJs": true
   },
-  "include": ["src/**/*", "src/data/*.json"],
+  "include": ["src/**/*", "src/data/*.json", "src/vite-env.d.ts"],
   "exclude": ["dist", "node_modules"]
 } 
