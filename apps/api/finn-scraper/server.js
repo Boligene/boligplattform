@@ -1,3 +1,13 @@
+/**
+ * BOLIG-SCRAPER MED PRIORITERT SALGSOPPGAVE-ANALYSE
+ * 
+ * VIKTIG DATAKILDEPRIORITET:
+ * 1. SALGSOPPGAVE (HOVEDKILDE) - Ekstrahert fra PDF/dokument med robuste regex
+ * 2. SCRAPING (FALLBACK) - Henter data fra Finn.no-siden hvis salgsoppgave ikke finnes
+ * 
+ * Alle endepunkter prøver å kombinere disse kildene med prioritering av salgsoppgave-data.
+ */
+
 const express = require("express");
 const cors = require("cors");
 const puppeteer = require("puppeteer");
@@ -22,6 +32,9 @@ const openai = new OpenAI({
 // System prompt for salgsoppgave analyse
 const systemPrompt = `
 Du er en norsk boligekspert og eiendomsmegler med lang erfaring. Du får en full salgsoppgave fra Finn.no/DNB/andre kilder.
+
+**VIKTIG:** Du vil få både strukturerte fakta og full tekst fra salgsoppgaven. PRIORITER ALLTID de strukturerte faktaene som er ekstrahert direkte fra salgsoppgaven - disse er mest nøyaktige.
+
 Analyser informasjonen grundig og gi en profesjonell vurdering på:
 
 1. TEKNISK TILSTAND: Vurder bygningens tekniske standard, vedlikeholdsbehov, installasoner (VVS, elektro, etc.)
@@ -270,9 +283,113 @@ async function getKeyValueData(page) {
   }
 }
 
+// Hjelpefunksjon for å ekstraktere Finn-kode fra URL
+function extractFinnCode(url) {
+  const match = url.match(/finnkode=(\d+)/);
+  return match ? match[1] : null;
+}
+
+// Hjelpefunksjon for å validere at et dokument tilhører riktig eiendom
+async function validateDocumentForProperty(documentUrl, originalFinnUrl, page) {
+  const finnCode = extractFinnCode(originalFinnUrl);
+  if (!finnCode) return true; // Hvis vi ikke kan finne finn-kode, godta dokumentet
+  
+  // **FORBEDRET VALIDERING MED LENGRE TIMEOUT OG BEDRE FEILHÅNDTERING**
+  try {
+    console.log(`🔍 Validerer dokument: ${documentUrl.substring(0, 100)}...`);
+    
+    const tempPage = await page.browser().newPage();
+    
+    // Sett mer realistisk timeout og user agent
+    await tempPage.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+    
+    // Øk timeout til 30 sekunder og bruk mindre streng waitUntil
+    await tempPage.goto(documentUrl, { 
+      waitUntil: 'domcontentloaded', // Mindre streng enn networkidle0
+      timeout: 30000 // 30 sekunder i stedet for 10
+    });
+    
+    // Vent litt ekstra for at siden skal bli ferdig lastet
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Hent både tekst og metadata fra siden
+    const validation = await tempPage.evaluate((expectedFinnCode) => {
+      const pageText = document.body.textContent.toLowerCase();
+      const pageHtml = document.body.innerHTML.toLowerCase();
+      const pageTitle = document.title.toLowerCase();
+      
+      // Sjekk forskjellige måter finn-koden kan være referert til
+      const checks = {
+        directFinnCode: pageText.includes(expectedFinnCode),
+        finnUrl: pageText.includes(`finnkode=${expectedFinnCode}`),
+        finnReference: pageText.includes('finn.no') && pageText.includes(expectedFinnCode),
+        htmlFinnCode: pageHtml.includes(expectedFinnCode),
+        dataAttributes: pageHtml.includes(`"${expectedFinnCode}"`),
+        titleFinnCode: pageTitle.includes(expectedFinnCode),
+        // Sjekk også URL-en selv
+        urlFinnCode: window.location.href.includes(expectedFinnCode)
+      };
+      
+      // Ekstra sjekk for megler-spesifikke estate-IDs eller referanser
+      let hasValidReference = Object.values(checks).some(check => check);
+      
+      // Hvis ingen direkte referanse, men det er en megler-side, godkjenn den
+      // (mange meglere bruker interne IDs i stedet for finn-koder)
+      if (!hasValidReference && (
+        pageText.includes('salgsoppgave') || 
+        pageText.includes('prospekt') ||
+        pageText.includes('eiendomsmegler') ||
+        pageHtml.includes('eiendomsmegler')
+      )) {
+        hasValidReference = true;
+        checks.meglerSide = true;
+        console.log('   - Godkjent som megler-side med salgsoppgave-innhold');
+      }
+      
+      return {
+        checks: checks,
+        hasValidReference: hasValidReference,
+        pageTextPreview: pageText.substring(0, 300),
+        url: window.location.href,
+        title: document.title
+      };
+    }, finnCode);
+    
+    await tempPage.close();
+    
+    console.log(`🔍 Validering for Finn-kode ${finnCode}:`);
+    console.log('   - Direkte finn-kode:', validation.checks.directFinnCode ? '✅' : '❌');
+    console.log('   - Finn URL:', validation.checks.finnUrl ? '✅' : '❌');
+    console.log('   - Finn referanse:', validation.checks.finnReference ? '✅' : '❌');
+    console.log('   - HTML finn-kode:', validation.checks.htmlFinnCode ? '✅' : '❌');
+    console.log('   - URL finn-kode:', validation.checks.urlFinnCode ? '✅' : '❌');
+    console.log('   - Megler-side:', validation.checks.meglerSide ? '✅' : '❌');
+    console.log('   - Resultat:', validation.hasValidReference ? '✅ GODKJENT' : '❌ FORKASTET');
+    
+    if (!validation.hasValidReference) {
+      console.log('   - Side tittel:', validation.title);
+      console.log('   - Innhold (preview):', validation.pageTextPreview.substring(0, 150));
+    }
+    
+    return validation.hasValidReference;
+  } catch (error) {
+    console.log('⚠️ Validering feilet:', error.message);
+    
+    // **MINDRE STRENG FALLBACK**: Godkjenn dokumentet hvis det er fra en kjent megler-side
+    if (documentUrl.includes('eiendomsmegler') || documentUrl.includes('em1sr')) {
+      console.log('   - Godkjent som kjent megler-side tross validering-feil');
+      return true;
+    }
+    
+    return false;
+  }
+}
+
 // Forbedret funksjon for å finne salgsoppgaver via nettverkstrafikk og dokumentlenker
 async function findSalgsoppgavePDF(page, url) {
   console.log('🔍 Leter etter salgsoppgave på:', url);
+  const finnCode = extractFinnCode(url);
+  console.log('🏷️ Finn-kode:', finnCode);
   
   try {
     const dokumenter = [];
@@ -406,11 +523,19 @@ async function findSalgsoppgavePDF(page, url) {
     console.log('⏳ Venter på nettverkstrafikk...');
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // 4. Klikk på potensielle dokumentlenker for å trigge nettverkskall
+    // 4. Klikk på potensielle dokumentlenker for å trigge nettverkskall (med validering)
     for (const lenke of domLenker.slice(0, 3)) { // Test maks 3 lenker
       if (lenke.type === 'dom_link' && lenke.url.startsWith('http')) {
         try {
           console.log('🖱️ Tester dokumentlenke:', lenke.text);
+          
+          // Først validér at dokumentet tilhører riktig eiendom
+          const isValidDocument = await validateDocumentForProperty(lenke.url, url, page);
+          
+          if (!isValidDocument) {
+            console.log('❌ Dokumentet tilhører ikke riktig eiendom - hopper over');
+            continue;
+          }
           
           // Prøv å navigere til lenken i en ny fane (simulert)
           const linkPage = await page.browser().newPage();
@@ -492,6 +617,256 @@ async function downloadAndParsePDF(pdfUrl, browser) {
     console.error('❌ Feil ved nedlasting/parsing av PDF:', error);
     throw error;
   }
+}
+
+// **HOVEDFUNKSJON for å ekstraktere strukturerte fakta fra salgsoppgave**
+// VIKTIG: Salgsoppgaven er ALLTID hovedkilden - denne data skal prioriteres over scraping
+function extractSalgsoppgaveFakta(salgsoppgaveText) {
+  console.log('📋 Ekstraherer strukturerte fakta fra salgsoppgave (HOVEDKILDE)');
+  
+  if (!salgsoppgaveText || salgsoppgaveText.length < 50) {
+    console.log('⚠️ Ingen salgsoppgave-tekst å analysere');
+    return {};
+  }
+  
+  const fakta = {};
+  const text = salgsoppgaveText.toLowerCase();
+  
+  // **ANTALL SOVEROM** - omfattende regex-mønstre
+  const soverommønstre = [
+    // Standard mønstre
+    /(?:antall\s+)?soverom[\s\n]*:?\s*(\d+)/i,
+    /(\d+)\s*soverom/i,
+    /(\d+)\s*stk\s*soverom/i,
+    /(\d+)\s*soverom\s*(?:i\s*alt|totalt)/i,
+    // Sov-rom varianter
+    /sov-rom[\s\n]*:?\s*(\d+)/i,
+    /sov\.?rom[\s\n]*:?\s*(\d+)/i,
+    /(\d+)\s*sov\.?rom/i,
+    /(\d+)\s*sovrom/i,
+    // Fra beskrivelser
+    /(?:har|med|inkludert)\s*(\d+)\s*soverom/i,
+    /(\d+)\s*(?:store?|små?|doble?)\s*soverom/i,
+    /boligen\s+har\s*(\d+)\s*soverom/i,
+    // Med parenteser
+    /soverom\s*\((\d+)\)/i,
+    /(\d+)[-/]soverom/i
+  ];
+  
+  for (const pattern of soverommønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1] && parseInt(match[1]) > 0 && parseInt(match[1]) < 20) {
+      fakta.antallSoverom = match[1];
+      console.log(`🎯 Fant antall soverom fra salgsoppgave: ${match[1]} (mønster: ${pattern.toString().substring(0,50)}...)`);
+      break;
+    }
+  }
+  
+  // **ANTALL ROM** - omfattende regex-mønstre
+  const rommønstre = [
+    // Standard mønstre
+    /(?:antall\s+)?rom[\s\n]*:?\s*(\d+)/i,
+    /(\d+)\s*rom(?!\s*leilighet)/i,
+    /(\d+)\s*stk\s*rom/i,
+    /(\d+)\s*rom\s*(?:i\s*alt|totalt)/i,
+    // P-rom (primærrom)
+    /p-rom[\s\n]*:?\s*(\d+)/i,
+    /primærrom[\s\n]*:?\s*(\d+)/i,
+    // Fra beskrivelser
+    /(\d+)-roms?\s*(?:leilighet|bolig)/i,
+    /boligen\s+har\s*(\d+)\s*rom/i,
+    /(?:har|med|inkludert)\s*(\d+)\s*rom/i,
+    // Romfordeling
+    /romfordeling[\s\S]*?(\d+)\s*rom/i,
+    // Med parenteser
+    /rom\s*\((\d+)\)/i,
+    /(\d+)[-/]roms?/i
+  ];
+  
+  for (const pattern of rommønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1] && parseInt(match[1]) > 0 && parseInt(match[1]) < 50) {
+      fakta.antallRom = match[1];
+      console.log(`🎯 Fant antall rom fra salgsoppgave: ${match[1]} (mønster: ${pattern.toString().substring(0,50)}...)`);
+      break;
+    }
+  }
+  
+  // **BRUKSAREAL/PRIMÆRAREAL/TOTALAREAL** - omfattende regex-mønstre
+  const arealmønstre = [
+    // Bruksareal
+    /(?:internt\s+)?bruksareal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /bra-i[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /bra[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /p-rom[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /(\d+)\s*(?:m²|kvm|m2).*(?:bruksareal|bra-i|bra)/i,
+    // Primærareal
+    /primærareal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /primær\s*areal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /bop[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /(\d+)\s*(?:m²|kvm|m2).*primærareal/i,
+    // Totalareal
+    /totalareal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /total\s*areal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /bta[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    /(\d+)\s*(?:m²|kvm|m2).*totalareal/i,
+    // Generelt areal
+    /areal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)(?!\s*tomt)/i,
+    /boligen\s+(?:har|er)\s*(\d+)\s*(?:m²|kvm|m2)/i,
+    // Uten enhet (legges til senere)
+    /(?:internt\s+)?bruksareal[\s\n]*:?\s*(\d+)(?!\s*(?:m²|kvm|m2))/i,
+    /bra-i[\s\n]*:?\s*(\d+)(?!\s*(?:m²|kvm|m2))/i
+  ];
+  
+  for (const pattern of arealmønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1] && parseInt(match[1]) > 10 && parseInt(match[1]) < 2000) {
+      let value = match[1];
+      // Legg til m² hvis det ikke finnes
+      if (!match[0].includes('m²') && !match[0].includes('kvm') && !match[0].includes('m2')) {
+        value = value + ' m²';
+      } else {
+        // Standardiser til m²
+        value = match[0].replace(/(\d+)\s*(?:kvm|m2)/i, '$1 m²').match(/(\d+\s*m²)/i)?.[1] || value + ' m²';
+      }
+      fakta.bruksareal = value;
+      console.log(`🎯 Fant bruksareal fra salgsoppgave: ${value} (mønster: ${pattern.toString().substring(0,50)}...)`);
+      break;
+    }
+  }
+  
+  // **BOLIGTYPE** - omfattende regex-mønstre
+  const boligtypemønstre = [
+    /boligtype[\s\n]*:?\s*(leilighet|enebolig|tomannsbolig|rekkehus|gårdsbruk|villa|hytte)/i,
+    /(?:^|\n|\.)\s*(leilighet|enebolig|tomannsbolig|rekkehus|gårdsbruk|villa|hytte)(?:\s|$|\.)/i,
+    /(\d+-roms?\s*(?:leilighet|enebolig|villa))/i,
+    /type[\s\n]*:?\s*(leilighet|enebolig|tomannsbolig|rekkehus|gårdsbruk|villa|hytte)/i
+  ];
+  
+  for (const pattern of boligtypemønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1] && match[1].trim().length > 2) {
+      fakta.boligtype = match[1].trim();
+      console.log(`🎯 Fant boligtype fra salgsoppgave: ${match[1]} (mønster: ${pattern.toString().substring(0,50)}...)`);
+      break;
+    }
+  }
+  
+  // **BYGGEÅR** - omfattende regex-mønstre
+  const byggeårmønstre = [
+    /byggeår[\s\n]*:?\s*(\d{4})/i,
+    /bygget[\s\n]*:?\s*(\d{4})/i,
+    /oppført[\s\n]*:?\s*(\d{4})/i,
+    /fra\s+(\d{4})/i,
+    /(?:^|\n|\.)\s*(\d{4})(?:\s|$|\.)/,
+    /byggeår[\s\n]*:?\s*ca\.?\s*(\d{4})/i,
+    /bygget\s+(?:i|ca\.?)\s*(\d{4})/i
+  ];
+  
+  for (const pattern of byggeårmønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1]) {
+      const year = parseInt(match[1]);
+      if (year >= 1800 && year <= new Date().getFullYear() + 5) {
+        fakta.byggeaar = match[1];
+        console.log(`🎯 Fant byggeår fra salgsoppgave: ${match[1]} (mønster: ${pattern.toString().substring(0,50)}...)`);
+        break;
+      }
+    }
+  }
+  
+  // **ADRESSE** - omfattende regex-mønstre
+  const adressemønstre = [
+    // Standard norsk adresse
+    /([A-ZÆØÅ][a-zæøå\s]+\s+\d+[A-Za-z]?,\s+\d{4}\s+[A-ZÆØÅ][a-zæøå]+)/,
+    /adresse[\s\n]*:?\s*([A-ZÆØÅ][a-zæøå\s]+\s+\d+[A-Za-z]?,\s+\d{4}\s+[A-ZÆØÅ][a-zæøå]+)/i,
+    /beliggenhet[\s\n]*:?\s*([A-ZÆØÅ][a-zæøå\s]+\s+\d+[A-Za-z]?,\s+\d{4}\s+[A-ZÆØÅ][a-zæøå]+)/i
+  ];
+  
+  for (const pattern of adressemønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1] && match[1].trim().length > 10 && match[1].includes(',')) {
+      fakta.adresse = match[1].trim();
+      console.log(`🎯 Fant adresse fra salgsoppgave: ${match[1]} (mønster: ${pattern.toString().substring(0,50)}...)`);
+      break;
+    }
+  }
+  
+  // **PRIS/PRISANTYDNING** - omfattende regex-mønstre
+  const prismønstre = [
+    /prisantydning[\s\n]*:?\s*(\d{1,3}(?:\s\d{3})*)\s*kr/i,
+    /pris[\s\n]*:?\s*(\d{1,3}(?:\s\d{3})*)\s*kr/i,
+    /kr\.?\s*(\d{1,3}(?:\s\d{3})*)/i,
+    /(\d{1,3}(?:\s\d{3})*)\s*kr(?!\s*\/)/i,
+    /(?:^|\n|\.)\s*(\d{1,3}(?:\s\d{3})*)\s*(?:000\s*)?kr/i
+  ];
+  
+  for (const pattern of prismønstre) {
+    const match = salgsoppgaveText.match(pattern);
+    if (match && match[1]) {
+      const priceNum = parseInt(match[1].replace(/\s/g, ''));
+      if (priceNum >= 100000 && priceNum <= 100000000) { // Mellom 100k og 100M
+        fakta.pris = match[1] + ' kr';
+        console.log(`🎯 Fant pris fra salgsoppgave: ${match[1]} kr (mønster: ${pattern.toString().substring(0,50)}...)`);
+        break;
+      }
+    }
+  }
+  
+  console.log('✅ Ekstraherte salgsoppgave-fakta:', Object.keys(fakta));
+  return fakta;
+}
+
+// **FUNKSJON FOR Å SLÅ SAMMEN DATA MED PRIORITERING AV SALGSOPPGAVE**
+// VIKTIG: Salgsoppgave-data skal ALLTID prioriteres over scraping-data
+function combineDataWithSalgsoppgavePriority(scrapingData, salgsoppgaveFakta) {
+  console.log('🔄 === SLÅR SAMMEN DATA - PRIORITERER SALGSOPPGAVE ===');
+  console.log('📊 Scraping-data felter:', Object.keys(scrapingData || {}));
+  console.log('📋 Salgsoppgave-fakta felter:', Object.keys(salgsoppgaveFakta || {}));
+  
+  // Start med scraping-data som base
+  const combinedData = { ...scrapingData };
+  
+  // Oversett/map salgsoppgave-felter til riktige felt-navn
+  const fieldMapping = {
+    antallSoverom: 'antallSoverom',
+    antallRom: 'antallRom', 
+    bruksareal: 'bruksareal',
+    boligtype: 'boligtype',
+    byggeaar: 'byggeaar',
+    adresse: 'adresse',
+    pris: 'pris'
+  };
+  
+  let overriddenFields = [];
+  
+  // Overstyr med salgsoppgave-data der det finnes (HOVEDKILDE)
+  for (const [salgsoppgaveField, targetField] of Object.entries(fieldMapping)) {
+    if (salgsoppgaveFakta && salgsoppgaveFakta[salgsoppgaveField]) {
+      const oldValue = combinedData[targetField];
+      combinedData[targetField] = salgsoppgaveFakta[salgsoppgaveField];
+      
+      if (oldValue && oldValue !== salgsoppgaveFakta[salgsoppgaveField]) {
+        overriddenFields.push(`${targetField}: "${oldValue}" → "${salgsoppgaveFakta[salgsoppgaveField]}"`);
+        console.log(`🎯 OVERSTYR ${targetField}: "${oldValue}" → "${salgsoppgaveFakta[salgsoppgaveField]}" (fra salgsoppgave)`);
+      } else {
+        console.log(`✅ LEGG TIL ${targetField}: "${salgsoppgaveFakta[salgsoppgaveField]}" (fra salgsoppgave)`);
+      }
+    }
+  }
+  
+  // Legg til metadata om datakilde
+  combinedData._dataKilde = {
+    hovedkilde: 'salgsoppgave',
+    fallback: 'scraping',
+    overstyrteFelter: overriddenFields,
+    salgsoppgaveFelter: Object.keys(salgsoppgaveFakta || {}),
+    scrapingFelter: Object.keys(scrapingData || {}),
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log('✅ Data sammenslått. Overstyrte felter:', overriddenFields.length);
+  return combinedData;
 }
 
 // Funksjon for å ekstrahere detaljert info fra salgsoppgave-tekst for chat-bot
@@ -646,16 +1021,41 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
     let salgsoppgaveText = '';
     let source = '';
     
-    // 2. Prøv å behandle alle fundne dokumenter med prioritert rekkefølge
+    // 2. **VALIDÉR DOKUMENTER FØR BEHANDLING**
+    // Først, filtrer bort dokumenter som ikke tilhører riktig eiendom
+    const validatedDocuments = [];
+    for (const doc of documentLinks) {
+      if (doc.url && doc.url.startsWith('http') && doc.type === 'dom_link') {
+        try {
+          const isValid = await validateDocumentForProperty(doc.url, finnUrl, page);
+          if (isValid) {
+            validatedDocuments.push(doc);
+            console.log('✅ Godkjent dokument:', doc.url.substring(0, 80));
+          } else {
+            console.log('❌ Forkastet dokument (feil eiendom):', doc.url.substring(0, 80));
+          }
+        } catch (error) {
+          console.log('⚠️ Kunne ikke validere dokument:', doc.url.substring(0, 80), error.message);
+          // Hvis validering feiler, ikke ta med dokumentet
+        }
+      } else {
+        // Behold ikke-URL dokumenter (JSON, base64 etc) og andre typer
+        validatedDocuments.push(doc);
+      }
+    }
+    
+    console.log(`📊 Validerte ${validatedDocuments.length} av ${documentLinks.length} dokumenter`);
+    
+    // Prøv å behandle alle validerte dokumenter med prioritert rekkefølge
     const prioriterteDokumenter = [
-      ...documentLinks.filter(d => d.type === 'pdf' || d.url?.includes('.pdf')),
-      ...documentLinks.filter(d => d.type === 'base64'),
-      ...documentLinks.filter(d => d.type === 'json'),
-      ...documentLinks.filter(d => d.type === 'verified_document_page'),
-      ...documentLinks.filter(d => d.type === 'dom_link' && !d.url?.includes('.pdf'))
+      ...validatedDocuments.filter(d => d.type === 'pdf' || d.url?.includes('.pdf')),
+      ...validatedDocuments.filter(d => d.type === 'base64'),
+      ...validatedDocuments.filter(d => d.type === 'json'),
+      ...validatedDocuments.filter(d => d.type === 'verified_document_page'),
+      ...validatedDocuments.filter(d => d.type === 'dom_link' && !d.url?.includes('.pdf'))
     ];
     
-    console.log('📊 Behandler', prioriterteDokumenter.length, 'dokumenter i prioritert rekkefølge');
+    console.log('📊 Behandler', prioriterteDokumenter.length, 'validerte dokumenter i prioritert rekkefølge');
     
     for (const dokument of prioriterteDokumenter) {
       try {
@@ -685,17 +1085,57 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
       }
     }
     
-    // 3. Fallback: scrape den synlige informasjonen på hovedsiden
+    // 3. **FORBEDRET FALLBACK**: Hent mer strukturert info fra hovedsiden
     if (!salgsoppgaveText || salgsoppgaveText.length < 200) {
-      console.log('📄 Fallback: henter synlig informasjon fra hovedsiden');
+      console.log('📄 Fallback: henter utvidet informasjon fra hovedsiden');
       
-      const pageText = await page.evaluate(() => {
+      const pageData = await page.evaluate(() => {
         // Fjern ikke-relevante elementer
         const elementsToRemove = document.querySelectorAll('script, style, nav, header, footer, .cookie-banner, .ad');
         elementsToRemove.forEach(el => el.remove());
         
         // Hent relevant innhold
         const content = [];
+        
+        // **UTVIDET SØKING ETTER SALGSOPPGAVE-LENKER**
+        const salgsoppgaveLinks = [];
+        const allLinks = document.querySelectorAll('a[href*="salgsoppgave"], a[href*="prospekt"], a[href*="em1sr"], a[href*="eiendomsmegler"]');
+        allLinks.forEach(link => {
+          if (link.href && link.href.startsWith('http')) {
+            salgsoppgaveLinks.push({
+              url: link.href,
+              text: link.textContent.trim(),
+              title: link.title || link.getAttribute('aria-label') || ''
+            });
+          }
+        });
+        
+        // **STRUKTURERT DATAHENTING**
+        const strukturertData = {};
+        
+        // Hent alle key-value par fra siden
+        const allText = document.body.textContent;
+        const lines = allText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        
+        // Søk etter spesifikke data-mønstre
+        const dataPatterns = {
+          'Prisantydning': /Prisantydning[\s\n]*(\d{1,3}(?:\s\d{3})*)\s*kr/i,
+          'Totalpris': /Totalpris[\s\n]*(\d{1,3}(?:\s\d{3})*)\s*kr/i,
+          'Bruksareal': /(?:Internt\s+)?bruksareal[\s\n]*(\d+)\s*m²/i,
+          'Primærareal': /Primærareal[\s\n]*(\d+)\s*m²/i,
+          'Rom': /(\d+)\s*rom(?!\s*leilighet)/i,
+          'Soverom': /(\d+)\s*soverom/i,
+          'Byggeår': /Byggeår[\s\n]*(\d{4})/i,
+          'Eierform': /Eierform[\s\n]*(Eier|Andel|Aksje)/i,
+          'Energimerking': /Energimerking[\s\n]*([A-G])/i
+        };
+        
+        for (const [key, pattern] of Object.entries(dataPatterns)) {
+          const match = allText.match(pattern);
+          if (match && match[1]) {
+            strukturertData[key] = match[1];
+          }
+        }
         
         // Hovedinnhold med utvidede selektorer
         const mainSelectors = [
@@ -723,17 +1163,85 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
           content.push(document.body.innerText);
         }
         
-        return content.join('\n');
+        return {
+          text: content.join('\n'),
+          salgsoppgaveLinks: salgsoppgaveLinks,
+          strukturertData: strukturertData
+        };
       });
       
-      if (pageText && pageText.length > (salgsoppgaveText?.length || 0)) {
-        salgsoppgaveText = pageText;
-        source = 'Hovedside (fallback)';
-        console.log('📄 Fallback-tekst hentet, lengde:', pageText.length, 'tegn');
-      }
-    }
+      if (pageData.text && pageData.text.length > (salgsoppgaveText?.length || 0)) {
+        salgsoppgaveText = pageData.text;
+        source = 'Hovedside (forbedret fallback)';
+        console.log('📄 Forbedret fallback-tekst hentet, lengde:', pageData.text.length, 'tegn');
+        
+        // Logg funnet strukturert data
+        if (Object.keys(pageData.strukturertData).length > 0) {
+          console.log('📊 Strukturert data fra hovedside:', pageData.strukturertData);
+        }
+        
+                 // Logg eventuelle salgsoppgave-lenker som ikke ble testet
+         if (pageData.salgsoppgaveLinks.length > 0) {
+           console.log('🔗 Ekstra salgsoppgave-lenker funnet:', pageData.salgsoppgaveLinks.length);
+           pageData.salgsoppgaveLinks.forEach((link, index) => {
+             console.log(`   ${index + 1}. ${link.text} (${link.url.substring(0, 80)}...)`);
+           });
+           
+           // **SISTE FORSØK**: Prøv å laste første salgsoppgave-lenke direkte
+           if (pageData.salgsoppgaveLinks.length > 0 && (!salgsoppgaveText || salgsoppgaveText.length < 1000)) {
+             console.log('🔄 Siste forsøk: laster første salgsoppgave-lenke direkt...');
+             
+             try {
+               const extraPage = await browser.newPage();
+               await extraPage.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+               
+               const firstLink = pageData.salgsoppgaveLinks[0];
+               console.log(`📥 Forsøker å laste: ${firstLink.url}`);
+               
+               await extraPage.goto(firstLink.url, { 
+                 waitUntil: 'domcontentloaded',
+                 timeout: 20000 
+               });
+               
+               // Vent litt for at siden skal bli ferdig lastet
+               await new Promise(resolve => setTimeout(resolve, 3000));
+               
+               const extraText = await extraPage.evaluate(() => {
+                 const elementsToRemove = document.querySelectorAll('script, style, nav, header, footer');
+                 elementsToRemove.forEach(el => el.remove());
+                 
+                 return document.body ? document.body.innerText : '';
+               });
+               
+               await extraPage.close();
+               
+               if (extraText && extraText.length > salgsoppgaveText.length) {
+                 console.log('✅ Fant bedre tekst fra direkte salgsoppgave-lenke!');
+                 console.log(`📄 Ny tekstlengde: ${extraText.length} tegn (fra ${salgsoppgaveText.length})`);
+                 salgsoppgaveText = extraText;
+                 source = `Direkte salgsoppgave-lenke: ${firstLink.text}`;
+               } else {
+                 console.log('⚠️ Direkte lenke ga ikke bedre resultat');
+               }
+               
+             } catch (error) {
+               console.log('❌ Kunne ikke laste direkte salgsoppgave-lenke:', error.message);
+             }
+           }
+         }
+       }
+     }
     
     await page.close();
+    
+    // 4. **EKSTRAHER STRUKTURERTE FAKTA FRA SALGSOPPGAVE (HOVEDKILDE)**
+    // VIKTIG: Dette er hovedkilden - skal prioriteres over all scraping-data
+    let salgsoppgaveFakta = {};
+    if (salgsoppgaveText && salgsoppgaveText.length > 100) {
+      console.log('📊 === EKSTRAHERER STRUKTURERTE FAKTA FRA SALGSOPPGAVE (HOVEDKILDE) ===');
+      salgsoppgaveFakta = extractSalgsoppgaveFakta(salgsoppgaveText);
+      console.log('✅ Salgsoppgave-fakta ekstrahert:', salgsoppgaveFakta);
+    }
     
     // 5. Analyser med OpenAI hvis vi har tekst og API-nøkkel
     let analysis = null;
@@ -744,6 +1252,18 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
       
       if (process.env.OPENAI_API_KEY) {
         try {
+          // Bygg utvidet prompt med strukturerte fakta
+          let strukturerteFakta = '';
+          if (Object.keys(salgsoppgaveFakta).length > 0) {
+            strukturerteFakta = `\n\n**STRUKTURERTE FAKTA EKSTRAHERT FRA SALGSOPPGAVE (prioriter denne informasjonen):**\n`;
+            for (const [key, value] of Object.entries(salgsoppgaveFakta)) {
+              strukturerteFakta += `- ${key}: ${value}\n`;
+            }
+            strukturerteFakta += `\n**VIKTIG:** Bruk disse strukturerte fakta som hovedkilde i din analyse.\n`;
+          }
+          
+          const fullPrompt = `Analyser denne salgsoppgaven:${strukturerteFakta}\n\n**FULL SALGSOPPGAVE-TEKST:**\n${salgsoppgaveText.substring(0, 10000)}`;
+          
           const completion = await openai.chat.completions.create({
             model: "gpt-3.5-turbo",
             messages: [
@@ -753,7 +1273,7 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
               },
               {
                 role: "user", 
-                content: `Analyser denne salgsoppgaven:\n\n${salgsoppgaveText.substring(0, 10000)}`
+                content: fullPrompt
               }
             ],
             temperature: 0.3,
@@ -825,6 +1345,8 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
       textLength: salgsoppgaveText.length,
       analysis: analysis,
       rawText: process.env.NODE_ENV === 'development' ? salgsoppgaveText.substring(0, 2000) : undefined,
+      // **HOVEDDATA FRA SALGSOPPGAVE (PRIORITERES OVER SCRAPING)**
+      salgsoppgaveFakta: salgsoppgaveFakta,
       // Legg til et sammendrag av viktig informasjon for chat-bot
       detailedInfo: salgsoppgaveText ? extractDetailedInfo(salgsoppgaveText) : null
     };
@@ -1235,21 +1757,98 @@ app.post("/api/parse-finn", async (req, res) => {
       
       // Forbedrede regex-mønstre for nøkkeldata
       const patterns = {
-        // Bruksareal - fikser dobbel m² problem
+        // Bruksareal - utvidede mønstre for å matche flere varianter
         bruksareal: [
-          /(?:Internt\s+)?bruksareal[\s\n]*(\d+)\s*m²/i,
-          /(?:BRA-i|P-rom)[\s\n]*(\d+)\s*m²/i,
-          /(\d+)\s*m².*(?:BRA-i|bruksareal)/i
+          // Standard bruksareal mønstre
+          /(?:Internt\s+)?bruksareal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Bruksareal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /BRA[\s\n]*:?\s*(\d+)\s*m²/i,
+          /BRA-i[\s\n]*:?\s*(\d+)\s*m²/i,
+          /P-rom[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Primærareal[\s\n]*:?\s*(\d+)\s*m²/i,
+          // Omvendte mønstre (m² først)
+          /(\d+)\s*m².*(?:BRA-i|bruksareal|primærareal)/i,
+          /(\d+)\s*m².*(?:internt\s+)?bruksareal/i,
+          // Areal varianter
+          /Areal\s*\(bruk\)[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Areal[\s\n]*:?\s*(\d+)\s*m²(?!\s*tomt)/i,
+          /(\d+)\s*(?:kvm|m2).*bruksareal/i,
+          /(\d+)\s*(?:kvm|m2).*BRA/i,
+          // Uten m² (legges til senere)
+          /(?:Internt\s+)?bruksareal[\s\n]*:?\s*(\d+)(?!\s*m²)/i,
+          /BRA-i[\s\n]*:?\s*(\d+)(?!\s*m²)/i,
+          /P-rom[\s\n]*:?\s*(\d+)(?!\s*m²)/i,
+          // Fra tekst med beskrivelse
+          /boligen\s+har\s+(\d+)\s*m²\s*bruksareal/i,
+          /(\d+)\s*m²\s*(?:stort|store)\s*bruksareal/i,
+          // Med parenteser
+          /Areal\s*\((\d+)\s*m²\)/i,
+          /Bruksareal\s*\((\d+)\s*m²\)/i
         ],
         
-        // Rom og soverom
+        // Primærareal - nye mønstre
+        primaerareal: [
+          /Primærareal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Primær\s*areal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /P-areal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /(\d+)\s*m².*primærareal/i,
+          /BOP[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Primærareal\s*\((\d+)\s*m²\)/i
+        ],
+        
+        // Totalareal - nye mønstre  
+        totalareal: [
+          /Totalareal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Total\s*areal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /BTA[\s\n]*:?\s*(\d+)\s*m²/i,
+          /(\d+)\s*m².*totalareal/i,
+          /Samlet\s*areal[\s\n]*:?\s*(\d+)\s*m²/i,
+          /Totalareal\s*\((\d+)\s*m²\)/i
+        ],
+        
+        // Rom og soverom - utvidede mønstre
         antallRom: [
-          /Rom[\s\n]*(\d+)/i,
-          /(\d+)\s*rom(?!\s*leilighet)/i
+          // Standard mønstre
+          /Rom[\s\n]*:?\s*(\d+)/i,
+          /(\d+)\s*rom(?!\s*leilighet)/i,
+          // Antall rom varianter
+          /Antall\s+rom[\s\n]*:?\s*(\d+)/i,
+          /(\d+)\s*stk\s*rom/i,
+          /(\d+)\s*rom\s*(?:i\s*alt|totalt)/i,
+          // P-rom (primærrom)
+          /P-rom[\s\n]*:?\s*(\d+)/i,
+          /Primærrom[\s\n]*:?\s*(\d+)/i,
+          // Andre varianter
+          /Rom\s*\((\d+)\)/i,
+          /Romfordeling[\s\S]*?(\d+)\s*rom/i,
+          /(\d+)-roms?\s*(?:leilighet|bolig)/i,
+          // Med bindestrek eller skråstrek
+          /Rom[-/]\s*(\d+)/i,
+          /(\d+)[-/]roms?/i
         ],
         antallSoverom: [
-          /Soverom[\s\n]*(\d+)/i,
-          /(\d+)\s*soverom/i
+          // Standard mønstre
+          /Soverom[\s\n]*:?\s*(\d+)/i,
+          /(\d+)\s*soverom/i,
+          // Antall soverom varianter
+          /Antall\s+soverom[\s\n]*:?\s*(\d+)/i,
+          /(\d+)\s*stk\s*soverom/i,
+          /(\d+)\s*soverom\s*(?:i\s*alt|totalt)/i,
+          // Sov-rom varianter
+          /Sov-rom[\s\n]*:?\s*(\d+)/i,
+          /Sov\.?rom[\s\n]*:?\s*(\d+)/i,
+          // Andre varianter
+          /Soverom\s*\((\d+)\)/i,
+          /(\d+)\s*sov\.?rom/i,
+          /(\d+)\s*sovrom/i,
+          // Med bindestrek eller skråstrek
+          /Soverom[-/]\s*(\d+)/i,
+          /(\d+)[-/]soverom/i,
+          // Spesifikke beskrivelser
+          /(\d+)\s*(?:doble?|store?|små?)\s*soverom/i,
+          /Soverom.*?(\d+)\s*(?:stk|rom)/i,
+          // Fra romfordeling tekst
+          /(?:har|med|inkludert)\s*(\d+)\s*soverom/i
         ],
         
         // Boligtype - mer spesifikke mønstre
@@ -1363,13 +1962,15 @@ app.post("/api/parse-finn", async (req, res) => {
           if (match && match[1] && match[1].trim()) {
             let value = match[1].trim();
             
-            // Spesialbehandling for bruksareal - unngå dobbel m²
-            if (key === 'bruksareal') {
-              if (!value.includes('m²')) {
+            // Spesialbehandling for areal-felter - unngå dobbel m²
+            if (['bruksareal', 'primaerareal', 'totalareal'].includes(key)) {
+              if (!value.includes('m²') && !value.includes('kvm') && !value.includes('m2')) {
                 value = value + ' m²';
               }
               // Fjern dobbel m² hvis det finnes
               value = value.replace(/m²\s*m²/, 'm²');
+              // Standardiser kvm og m2 til m²
+              value = value.replace(/\b(kvm|m2)\b/g, 'm²');
             }
             
             // Spesialbehandling for kommune - ta andre gruppe hvis det finnes
@@ -1383,6 +1984,10 @@ app.post("/api/parse-finn", async (req, res) => {
             }
             
             result[key] = value;
+            
+            // Logg hvilke mønstre som treffer for debugging
+            console.log(`🎯 Fant ${key}: "${value}" med mønster:`, pattern.toString());
+            
             break; // Ta første match
           }
         }
@@ -1413,6 +2018,32 @@ app.post("/api/parse-finn", async (req, res) => {
       return result;
     });
 
+    // **PRØV Å HENTE SALGSOPPGAVE-FAKTA FOR Å FORBEDRE DATA**
+    // VIKTIG: Salgsoppgave er hovedkilden og skal prioriteres
+    console.log('📋 === PRØVER Å HENTE SALGSOPPGAVE-FAKTA ===');
+    let salgsoppgaveFakta = {};
+    
+    try {
+      // Hent salgsoppgave-tekst fra siden (forenklet versjon)
+      const pageText = await page.evaluate(() => {
+        const elementsToRemove = document.querySelectorAll('script, style, nav, header, footer');
+        elementsToRemove.forEach(el => el.remove());
+        return document.body.innerText;
+      });
+      
+      if (pageText && pageText.length > 500) {
+        console.log('📄 Fant tekst på siden, prøver å ekstraktere fakta...');
+        salgsoppgaveFakta = extractSalgsoppgaveFakta(pageText);
+        console.log('✅ Ekstraherte salgsoppgave-fakta:', Object.keys(salgsoppgaveFakta));
+        
+        // Kombiner scraping-data med salgsoppgave-fakta (prioriter salgsoppgave)
+        data = combineDataWithSalgsoppgavePriority(data, salgsoppgaveFakta);
+        console.log('🔄 Kombinerte data med salgsoppgave-fakta');
+      }
+    } catch (error) {
+      console.log('⚠️ Kunne ikke hente salgsoppgave-fakta:', error.message);
+    }
+    
     console.log('✅ Scraping fullført!');
     console.log('📍 Adresse:', data.adresse);
     console.log('💰 Pris:', data.pris);
@@ -1460,8 +2091,22 @@ app.post("/api/parse-finn", async (req, res) => {
       meglerTelefon: data.meglerTelefon || "",
       meglerEpost: data.meglerEpost || "",
       scraped_at: new Date().toISOString(),
-      beskrivelse: data.beskrivelse || ""
+      beskrivelse: data.beskrivelse || "",
+      
+      // **METADATA OM DATAKILDE**
+      _salgsoppgaveFakta: salgsoppgaveFakta || {},
+      _dataKilde: data._dataKilde || {
+        hovedkilde: 'scraping',
+        fallback: 'ingen',
+        timestamp: new Date().toISOString()
+      }
     };
+    
+    // Logg hele resultatobjektet for debugging
+    console.log('📊 RESULTAT SOM SENDES TIL FRONTEND:');
+    console.log('=====================================');
+    console.log(JSON.stringify(resultData, null, 2));
+    console.log('=====================================');
     
     return res.json(resultData);
   } catch (error) {
@@ -1514,7 +2159,7 @@ app.post("/api/analyse-takst", (req, res, next) => {
     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
       // Returner dummy-data hvis ingen API-nøkkel
-      return res.json({
+      const dummyResult = {
         sammendrag: "Dette er et eksempel på sammendrag fra AI-analyse.",
         avvik: [
           { beskrivelse: "Fukt i kjeller", tg: "TG2" },
@@ -1522,7 +2167,15 @@ app.post("/api/analyse-takst", (req, res, next) => {
         ],
         risiko: "Moderat risiko. TG3-avvik bør utbedres snarlig.",
         forslagTittel: "Takstrapport for Eksempelveien 1"
-      });
+      };
+      
+      // Logg dummy-resultatet for debugging
+      console.log('📊 TAKST-ANALYSE DUMMY-RESULTAT:');
+      console.log('=================================');
+      console.log(JSON.stringify(dummyResult, null, 2));
+      console.log('=================================');
+      
+      return res.json(dummyResult);
     }
     const openai = new OpenAI({ apiKey: openaiApiKey });
     const prompt = `Du er en erfaren norsk boligrådgiver og takstekspert. Du skal analysere innholdet i en takstrapport fra en bolig (rapporten er limt inn under). Oppsummer de viktigste punktene og gi brukeren en tydelig og informativ rapport.\n\n**Oppgaven din:**\n- Gå gjennom teksten og hent ut de viktigste forholdene, avvikene og eventuelle risikoer.\n- Fremhev spesielt alle funn med tilstandsgrad 2 eller 3 (TG2/TG3), avvik, feil eller ting som kan koste penger å utbedre.\n- Lag en punktliste med maks 10 avvik og anbefalte tiltak. Hver avvik skal ha et felt 'tg' med verdien 'TG2' eller 'TG3' (ikke bare tall).\n- Gi et utfyllende sammendrag (det kan være langt) og en grundig risikovurdering.\n- Bruk et enkelt og forståelig språk (ingen faguttrykk).\n- Er du usikker, informer om at rapporten ikke er komplett og anbefal brukeren å lese hele takstrapporten selv.\n\nSvar alltid i gyldig, komplett JSON (ingen trailing commas, ingen kommentarer, ingen avbrutte arrays/objekter) med feltene: sammendrag, avvik (array med beskrivelse og tg), risiko, forslagTittel.\n\nHer er rapporten:\n${tekst}`;
@@ -1545,6 +2198,13 @@ app.post("/api/analyse-takst", (req, res, next) => {
     jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
     try {
       const json = JSON.parse(jsonString);
+      
+      // Logg AI-analysert takstrapport for debugging
+      console.log('📊 AI-ANALYSERT TAKSTRAPPORT:');
+      console.log('==============================');
+      console.log(JSON.stringify(json, null, 2));
+      console.log('==============================');
+      
       return res.json(json);
     } catch (err) {
       console.error("Kunne ikke parse AI-JSON:", err, "\nAI-svar:\n", jsonString);
@@ -1574,6 +2234,12 @@ app.post("/api/analyse-salgsoppgave", async (req, res) => {
     
     // Få utvidet analyse med salgsoppgave
     const result = await getSalgsoppgaveAnalysis(url);
+    
+    // Logg salgsoppgave-analyseresultat for debugging
+    console.log('📊 SALGSOPPGAVE-ANALYSE RESULTAT:');
+    console.log('==================================');
+    console.log(JSON.stringify(result, null, 2));
+    console.log('==================================');
     
     res.json(result);
     
@@ -1695,14 +2361,40 @@ app.post("/api/full-analysis", async (req, res) => {
     
     const [basicData, salgsoppgaveAnalysis] = await Promise.allSettled(promises);
     
+    // **SLÅ SAMMEN DATA MED PRIORITERING AV SALGSOPPGAVE**
+    console.log('🔄 === SLÅR SAMMEN GRUNNLEGGENDE DATA OG SALGSOPPGAVE-ANALYSE ===');
+    
+    const scrapingData = basicData.status === 'fulfilled' ? basicData.value : {};
+    const analysisResult = salgsoppgaveAnalysis.status === 'fulfilled' ? salgsoppgaveAnalysis.value : {};
+    const salgsoppgaveFakta = analysisResult.salgsoppgaveFakta || {};
+    
+    // Kombiner data med prioritering av salgsoppgave-fakta
+    const combinedBoligData = combineDataWithSalgsoppgavePriority(scrapingData, salgsoppgaveFakta);
+    
     const result = {
       url: url,
       timestamp: new Date().toISOString(),
-      basicData: basicData.status === 'fulfilled' ? basicData.value : { error: basicData.reason?.message },
-      salgsoppgaveAnalysis: salgsoppgaveAnalysis.status === 'fulfilled' ? salgsoppgaveAnalysis.value : { error: salgsoppgaveAnalysis.reason?.message }
+      
+      // **KOMBINERTE BOLIGDATA (HOVEDRESULTAT)**
+      // Salgsoppgave-data prioriteres over scraping-data
+      boligData: combinedBoligData,
+      
+      // **KILDEDATA FOR REFERANSE**
+      sources: {
+        basicScraping: basicData.status === 'fulfilled' ? basicData.value : { error: basicData.reason?.message },
+        salgsoppgaveAnalysis: analysisResult,
+        salgsoppgaveFakta: salgsoppgaveFakta
+      }
     };
     
     console.log('✅ Full analyse fullført');
+    
+    // Logg full analyse-resultat for debugging
+    console.log('📊 FULL ANALYSE RESULTAT:');
+    console.log('==========================');
+    console.log(JSON.stringify(result, null, 2));
+    console.log('==========================');
+    
     res.json(result);
     
   } catch (error) {

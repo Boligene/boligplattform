@@ -1,7 +1,7 @@
 import { BoligAnalyse, BoligScrapingData, ChatMessage, KjopsprosessVeiledning, UserPreferences } from '../types/ai.types';
 
 export class AIBoligService {
-  private static readonly API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+  private static readonly API_KEY = (import.meta as any).env?.VITE_OPENAI_API_KEY;
   private static readonly FINN_SCRAPER_URL = 'http://localhost:3001'; // Use the actual finn-scraper server
 
   // Hjelpefunksjon for å generere ID-er
@@ -158,23 +158,31 @@ export class AIBoligService {
       const fullAnalysisData = await response.json();
       console.log('📊 Mottatt full analyse data:', fullAnalysisData);
 
+      // **FIX: Hent data fra riktig sted - sources.basicScraping i stedet for basicData**
+      const basicScrapingData = fullAnalysisData.sources?.basicScraping || fullAnalysisData.boligData;
+      console.log('🔄 Bruker basic scraping data:', basicScrapingData);
+
       // Kjør standard AI-analyse parallellt hvis vi har API key
       const standardAnalyse = this.hasApiKey() ? 
-        await this.realOpenAIAnalyse(this.mapBasicDataToInterface(fullAnalysisData.basicData, url)) :
+        await this.realOpenAIAnalyse(this.mapBasicDataToInterface(basicScrapingData, url)) :
         await this.mockAnalyse(url);
+
+      // **PRIORITER SALGSOPPGAVE-DATA FRA BACKEND**
+      // Backend har allerede kombinert data med prioritering av salgsoppgave
+      const prioritizedData = fullAnalysisData.boligData || basicScrapingData;
 
       // Kombiner grunnleggende scraping med salgsoppgave-analyse
       const result = {
         url: url,
         timestamp: fullAnalysisData.timestamp,
         
-        // Grunnleggende boligdata
-        scraping_data: this.mapBasicDataToInterface(fullAnalysisData.basicData, url),
+        // **BRUK PRIORITERTE BOLIGDATA FRA BACKEND**
+        scraping_data: this.mapBasicDataToInterface(prioritizedData, url),
         
         // Utvidet salgsoppgave-analyse
-        salgsoppgaveAnalyse: fullAnalysisData.salgsoppgaveAnalysis,
+        salgsoppgaveAnalyse: fullAnalysisData.sources?.salgsoppgaveAnalysis,
         
-        // Standard AI-analyse basert på grunnleggende data
+        // Standard AI-analyse basert på prioriterte data
         standard_analyse: standardAnalyse,
         
         // Legg til OpenAI status informasjon som frontend forventer
@@ -191,8 +199,21 @@ export class AIBoligService {
         
         // Marker at vi har utført utvidet analyse
         hasUtvidetAnalyse: true,
-        hasSalgsoppgaveAnalyse: fullAnalysisData.salgsoppgaveAnalysis && fullAnalysisData.salgsoppgaveAnalysis.success,
+        hasSalgsoppgaveAnalyse: fullAnalysisData.sources?.salgsoppgaveAnalysis && fullAnalysisData.sources.salgsoppgaveAnalysis.success,
+        
+        // **LEGG TIL METADATA OM DATAKILDE**
+        _dataKilde: prioritizedData._dataKilde || {
+          hovedkilde: 'scraping',
+          fallback: 'ingen',
+          timestamp: new Date().toISOString()
+        }
       };
+
+      console.log('✅ Utvidet analyse fullført, bruker data:', {
+        adresse: result.scraping_data.adresse,
+        pris: result.scraping_data.pris,
+        dataKilde: result._dataKilde
+      });
 
       return result;
 

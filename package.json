@@ -16,7 +16,9 @@
     "type-check": "npm run type-check --workspaces",
     "clean": "rm -rf dist node_modules/.cache && npm run clean --workspaces",
     "mcp:sync": "node scripts/mcp-sync.js",
-    "mcp:status": "node scripts/mcp-status.js"
+    "mcp:status": "node scripts/mcp-status.js",
+    "start": "node apps/api/finn-scraper/server.js",
+    "start:api": "node apps/api/finn-scraper/server.js"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^6.21.0",
