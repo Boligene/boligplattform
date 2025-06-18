@@ -14,7 +14,7 @@ export const testSocialAuthProviders = async (): Promise<AuthProviderStatus[]> =
   for (const provider of providers) {
     try {
       // Test if provider is configured by attempting to get auth URL
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,

@@ -2,9 +2,11 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true
   },
-  "include": ["src", "../../packages/*/src"],
+  "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"],
   "references": [
     { "path": "../../packages/core" },

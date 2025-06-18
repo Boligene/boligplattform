@@ -2,7 +2,7 @@ import { BoligAnalyse, BoligScrapingData, ChatMessage, KjopsprosessVeiledning, U
 
 export class AIBoligService {
   private static readonly API_KEY = (import.meta as any).env?.VITE_OPENAI_API_KEY;
-  private static readonly FINN_SCRAPER_URL = 'http://localhost:3001'; // Use the actual finn-scraper server
+  // private static readonly FINN_SCRAPER_URL = 'http://localhost:3001'; // Use the actual finn-scraper server
 
   // Hjelpefunksjon for å generere ID-er
   private static generateId(): string {
@@ -694,8 +694,8 @@ VIKTIG: Du har tilgang til all denne informasjonen. Når brukeren spør om spesi
 
   // Kjøpsprosess veiledning
   static async getKjopsprosessVeiledning(
-    boligAnalyse: BoligAnalyse,
-    userPreferences?: UserPreferences
+    _boligAnalyse: BoligAnalyse,
+    _userPreferences?: UserPreferences
   ): Promise<KjopsprosessVeiledning> {
     // Mock veiledning for nå
     return {

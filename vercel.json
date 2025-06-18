@@ -1,11 +1,8 @@
 {
-  "builds": [
-    {
-      "src": "apps/web/package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
-    }
-  ],
+  "buildCommand": "cd apps/web && npm run build",
+  "outputDirectory": "apps/web/dist",
+  "installCommand": "npm install",
+  "framework": null,
   "routes": [
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
