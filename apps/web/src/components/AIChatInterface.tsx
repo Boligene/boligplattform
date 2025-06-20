@@ -1,6 +1,6 @@
+import { BoligAnalyse, ChatMessage } from '@boligplattform/core';
 import { Bot, Clock, Lightbulb, MessageSquare, Send, User } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { BoligAnalyse, ChatMessage } from '@boligplattform/core';
 
 // Simple ID generator for browser compatibility
 const generateId = () => {
@@ -194,7 +194,7 @@ export const AIChatInterface: React.FC<AIChatInterfaceProps> = ({
             <span className="text-xs font-medium text-gray-600">Hurtigspørsmål:</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {quickQuestions.map((question, index) => (
+            {quickQuestions.map((question, _index) => (
               <button
                 key={generateId()}
                 onClick={() => handleQuickQuestion(question)}

@@ -1,7 +1,6 @@
 import { SliderInput } from '@boligplattform/ui';
 import jsPDF from "jspdf";
 import { Info } from "lucide-react";
-import * as React from "react";
 import { useEffect, useState } from "react";
 import { useBolig } from '../context/BoligContext';
 
@@ -51,7 +50,7 @@ function beregnEgenkapital(boligtype: string, pris: number, fgjeld: number): Ege
 }
 
 export default function Kjopskalkulator() {
-  const { boliger, addBolig } = useBolig();
+  const { boliger } = useBolig(); // Removed unused addBolig
   const [valgtBoligId, setValgtBoligId] = useState<string>("");
   const [boligtype, setBoligtype] = useState<string>("selveier");
   const [prisantydning, setPrisantydning] = useState<number | undefined>(undefined);
@@ -59,7 +58,7 @@ export default function Kjopskalkulator() {
   const [egenkapital, setEgenkapital] = useState<number | undefined>(undefined);
   const [egenkapitalManuelt, setEgenkapitalManuelt] = useState<boolean>(false);
   const [forsikring, setForsikring] = useState<number>(500); // default 500 kr/mnd
-  const [eiendomsskatt, setEiendomsskatt] = useState<number>(0); // default 0 kr/mnd
+  const [eiendomsskatt, setEiendomsskatt] = useState<number>(0); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [termingebyr, setTermingebyr] = useState<number>(60); // default 60 kr/mnd
   const [felleskostnader, setFelleskostnader] = useState<number>(0);
   const [strom, setStrom] = useState<number>(0);
@@ -157,7 +156,7 @@ export default function Kjopskalkulator() {
     : 0;
   const felles = felleskostnader || 0;
   const mndForsikring = forsikring || 0;
-  const mndEiendomsskatt = eiendomsskatt ? Math.round(eiendomsskatt / 12) : 0;
+  // const mndEiendomsskatt = eiendomsskatt ? Math.round(eiendomsskatt / 12) : 0; // Unused
   const mndTermingebyr = termingebyr || 0;
   const mndStrom = strom || 0;
   const mndKommunaleAvg = kommunaleAvg ? Math.round(kommunaleAvg / 12) : 0;
@@ -228,26 +227,26 @@ export default function Kjopskalkulator() {
     }
   }
 
-  // Import fra FINN-scraper (JSON)
-  function handleImportBoliger(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target?.result as string);
-        if (Array.isArray(data)) {
-          data.forEach(bolig => addBolig(bolig));
-        } else if (typeof data === "object") {
-          addBolig(data);
-        }
-        alert("Bolig(er) importert!");
-      } catch {
-        alert("Kunne ikke importere boliger. Sjekk at filen er gyldig JSON.");
-      }
-    };
-    reader.readAsText(file);
-  }
+  // Import fra FINN-scraper (JSON) - Unused for now
+  // function handleImportBoliger(e: React.ChangeEvent<HTMLInputElement>) {
+  //   const file = e.target.files?.[0];
+  //   if (!file) return;
+  //   const reader = new FileReader();
+  //   reader.onload = (event) => {
+  //     try {
+  //       const data = JSON.parse(event.target?.result as string);
+  //       if (Array.isArray(data)) {
+  //         data.forEach(bolig => addBolig(bolig));
+  //       } else if (typeof data === "object") {
+  //         addBolig(data);
+  //       }
+  //       alert("Bolig(er) importert!");
+  //     } catch {
+  //       alert("Kunne ikke importere boliger. Sjekk at filen er gyldig JSON.");
+  //     }
+  //   };
+  //   reader.readAsText(file);
+  // }
 
   function handleStromChange(v: number) {
     setStrom(v);

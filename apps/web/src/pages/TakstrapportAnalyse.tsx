@@ -1,17 +1,16 @@
 import { AIBoligService } from '@boligplattform/core';
 import { AlertTriangle, ArrowRight, CheckCircle, FileText, Loader2, Upload } from "lucide-react";
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
 
 export default function TakstrapportAnalyse() {
   const [step, setStep] = React.useState(1); // 1: Last opp, 2: Analyserer, 3: Resultat
-  const [file, setFile] = React.useState<File | null>(null);
+  const [file, setFile] = React.useState<File | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [error, setError] = React.useState("");
   const [result, setResult] = React.useState<any>(null);
   const [manualText, setManualText] = React.useState("");
   const [showManual, setShowManual] = React.useState(false);
   const [suggestedTitle, setSuggestedTitle] = React.useState("");
-  const navigate = useNavigate();
+  // const navigate = useNavigate(); // Unused for now
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();

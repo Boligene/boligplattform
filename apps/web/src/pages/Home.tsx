@@ -242,7 +242,7 @@ export default function HomePage() {
                 </button>
               </div>
               <div className="flex flex-col gap-4">
-                {boliger.map((bolig: any, i: number) => {
+                {boliger.map((bolig: any, _i: number) => {
                   const valgt = valgtForSammenligning?.includes(bolig.id);
                   const localKey = `${bolig.adresse}|${bolig.pris}|${bolig.type}`;
                   const erFavoritt = !!favoritter[localKey];

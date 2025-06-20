@@ -118,8 +118,9 @@ export default function Utleiekalkulator() {
   let nettoInntekt = leieinntekt - totaleKostnader;
   if (skatt) nettoInntekt = nettoInntekt * 0.78; // 22% skatt
 
-  const direkteavkastning = kjøpesum > 0 ? ((nettoInntekt * 12) / kjøpesum) * 100 : 0;
-  const avkastningEK = egenkapital > 0 ? ((nettoInntekt * 12) / egenkapital) * 100 : 0;
+  // Beregn direkte avkastning for referanse
+  // const direkteavkastning = kjøpesum > 0 ? ((nettoInntekt * 12) / kjøpesum) * 100 : 0;
+  // const avkastningEK = egenkapital > 0 ? ((nettoInntekt * 12) / egenkapital) * 100 : 0;
 
   // Langtidsleie - totalberegninger etter alle kostnader
   const langtidÅrligNettoEtterKostnader = nettoInntekt * 12;
@@ -151,7 +152,8 @@ export default function Utleiekalkulator() {
   let nettoAirbnb = bruttoLeie - airbnbGebyrKr - rengjoringKr - andreUtgifterÅr;
   if (airbnbSkatt) nettoAirbnb = nettoAirbnb * 0.78; // 22% skatt
   const airbnbMnd = nettoAirbnb / 12;
-  const airbnbYield = kjøpesum > 0 ? (nettoAirbnb / kjøpesum) * 100 : 0;
+  // Beregn yield for referanse
+  // const airbnbYield = kjøpesum > 0 ? (nettoAirbnb / kjøpesum) * 100 : 0;
 
   // Totale boligkostnader for korttidsleie (månedlige)
   const airbnbTotaleBoligkostnader = terminbeløp + airbnbFelleskostnader + airbnbKommunaleAvgifter + airbnbForsikring + airbnbVedlikehold + airbnbStrøm + airbnbInternett;
