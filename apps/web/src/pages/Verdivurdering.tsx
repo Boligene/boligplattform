@@ -67,7 +67,7 @@ export default function Verdivurdering() {
   }
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col items-center justify-center py-10 px-2">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col items-center justify-center py-10 px-2">
       <div className="bg-white/80 rounded-2xl shadow-xl p-10 w-full max-w-xl flex flex-col items-center">
         <h2 className="text-3xl font-seriflogo font-bold text-brown-900 mb-6 text-center">Verdivurdering</h2>
         {loading ? (

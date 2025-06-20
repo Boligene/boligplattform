@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@boligplattform/core';
 import type { OffentligBolig } from '@boligplattform/core';
+import { supabase } from '@boligplattform/core';
+import { useEffect, useState } from 'react';
 
 export default function Boliger() {
   const [boliger, setBoliger] = useState<OffentligBolig[]>([]);
@@ -26,7 +26,7 @@ export default function Boliger() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat flex flex-col items-center py-10">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat flex flex-col items-center py-10">
       <h1 className="text-3xl font-seriflogo font-bold text-brown-800 mb-8">Boligsøk og sammenligning</h1>
 
       <div className="bg-white/90 rounded-2xl shadow-lg w-full max-w-6xl p-10">

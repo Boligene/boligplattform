@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@boligplattform/core';
 import type { Bolig } from '@boligplattform/core';
+import { supabase } from '@boligplattform/core';
+import { useEffect, useState } from 'react';
 
 export default function MineBoliger() {
   const [user, setUser] = useState<any>(null);
@@ -136,7 +136,7 @@ export default function MineBoliger() {
   }
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat flex flex-col items-center py-10">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat flex flex-col items-center py-10">
       <h1 className="text-3xl font-seriflogo font-bold text-brown-800 mb-8">Mine boliger</h1>
       <div className="bg-white/90 rounded-2xl shadow-lg w-full max-w-4xl p-10 flex flex-col items-center min-h-[300px]">
         {loading ? (

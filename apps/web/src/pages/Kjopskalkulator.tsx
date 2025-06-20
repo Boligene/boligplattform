@@ -1,9 +1,9 @@
 import { SliderInput } from '@boligplattform/ui';
-import { useBolig } from '@web/context/BoligContext';
 import jsPDF from "jspdf";
 import { Info } from "lucide-react";
 import * as React from "react";
 import { useEffect, useState } from "react";
+import { useBolig } from '../context/BoligContext';
 
 function Tooltip({ text }: { text: string }) {
   return (
@@ -265,7 +265,7 @@ export default function Kjopskalkulator() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed">
       <div className="bg-white/80 rounded-2xl shadow-xl p-4 sm:p-10 w-full max-w-2xl mt-10 flex flex-col items-center">
         <div className="w-full flex flex-col sm:flex-row justify-end items-center gap-2 mb-2">
           <button onClick={handleExportPDF} className="rounded-full px-4 py-2 bg-brown-500 text-white font-semibold hover:bg-brown-600 transition shadow">

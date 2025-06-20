@@ -1,6 +1,6 @@
+import { supabase } from '@boligplattform/core';
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@boligplattform/core';
 
 const AuthCallback: React.FC = () => {
   const navigate = useNavigate();
@@ -33,7 +33,7 @@ const AuthCallback: React.FC = () => {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat flex items-center justify-center">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat flex items-center justify-center">
       <div className="bg-white/90 rounded-2xl shadow-lg p-8 text-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brown-600 mx-auto mb-4"></div>
         <p className="text-brown-800">Fullfører innlogging...</p>

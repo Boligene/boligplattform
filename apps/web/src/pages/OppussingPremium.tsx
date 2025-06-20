@@ -359,7 +359,7 @@ ${r.navn} (${r.areal} m², ${r.kvalitet})
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed">
       <div className="bg-white/85 rounded-2xl shadow-xl p-8 w-full max-w-6xl mt-10 mb-10">
         {/* Header */}
         <div className="flex items-center justify-center mb-6">

@@ -1,9 +1,9 @@
+import { supabase } from '@boligplattform/core';
 import { ArrowRight, Calculator, Check, FileText, Hammer, HelpCircle, Home, Star, Trash2 } from "lucide-react";
 import * as React from "react";
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from "react-router-dom";
-import { useBolig } from '@web/context/BoligContext';
-import { supabase } from '@boligplattform/core';
+import { useBolig } from '../context/BoligContext';
 
 // Hjelpefunksjon for lagring i localStorage
 function lagreBoligerLokalt(boliger: any[]) {
@@ -189,7 +189,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col overflow-x-hidden">
+    <div className="min-h-screen w-full bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col overflow-x-hidden">
       <main className="flex flex-col items-center justify-center flex-1 w-full">
 
         <div className="bg-white/80 rounded-2xl shadow-xl p-2 sm:p-6 md:p-10 w-full max-w-2xl flex flex-col items-center mb-8">

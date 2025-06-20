@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useBolig } from '@web/context/BoligContext';
+import { useBolig } from '../context/BoligContext';
 
 // REALISTISKE STANDARDER (kan tilpasses)
 const DEFAULT_KVM = 70;                  // Gjett default hvis ukjent
@@ -52,7 +52,7 @@ export default function Sammenlign() {
   }
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed py-10 px-4 flex flex-col items-center">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed py-10 px-4 flex flex-col items-center">
       <div className="max-w-6xl w-full bg-white rounded-2xl shadow-xl p-8">
         <h1 className="text-3xl font-seriflogo font-bold text-brown-900 mb-6 text-center">Sammenlign valgte boliger</h1>
         <div className="overflow-x-auto">

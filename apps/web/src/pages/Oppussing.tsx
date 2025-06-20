@@ -132,7 +132,7 @@ export default function Oppussing() {
   const pris = valgt.prisPerM2 * areal * (1 + valgtFinish.tillegg);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed">
       <div className="bg-white/80 rounded-2xl shadow-xl p-10 w-full max-w-xl mt-10 flex flex-col items-center">
         <h2 className="text-3xl font-seriflogo font-bold text-brown-900 mb-6">
           Oppussingskalkulator

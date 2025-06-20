@@ -91,7 +91,7 @@ export default function TakstrapportAnalyse() {
   const visResultat = result || (step === 3 ? dummyResult : null);
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
       <main className="flex flex-col items-center justify-center flex-1">
         <div className="bg-white/80 rounded-2xl shadow-xl p-4 sm:p-6 md:p-10 w-full max-w-2xl flex flex-col items-center mb-8">
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-seriflogo font-bold text-brown-900 text-center mb-4 sm:mb-6 leading-tight">

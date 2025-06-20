@@ -1,6 +1,6 @@
 import { SliderInput } from '@boligplattform/ui';
-import { useBolig } from '@web/context/BoligContext';
 import * as React from "react";
+import { useBolig } from '../context/BoligContext';
 // @ts-ignore
 import { airbnbKorttidsleieData } from '@boligplattform/core';
 
@@ -165,7 +165,7 @@ export default function Utleiekalkulator() {
   const airbnbAvkastningEK = egenkapital > 0 ? (airbnbÅrligNettoEtterKostnader / egenkapital) * 100 : 0;
 
   return (
-    <div className="min-h-screen bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed py-8 px-2">
+    <div className="min-h-screen bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed py-8 px-2">
       <h1 className="text-3xl font-seriflogo font-bold text-brown-900 mb-6 text-center">Utleiekalkulator</h1>
       
       {/* NYTT: Velg importert bolig for autofyll */}

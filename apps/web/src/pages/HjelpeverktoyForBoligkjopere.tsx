@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 
 const HjelpeverktoyForBoligkjopere: React.FC = () => {
   return (
-    <div className="min-h-screen w-full bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
+    <div className="min-h-screen w-full bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
       <main className="flex-1 w-full p-6 lg:p-12">
         
         {/* Header */}

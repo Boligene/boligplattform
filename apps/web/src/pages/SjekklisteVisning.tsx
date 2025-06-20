@@ -1,6 +1,6 @@
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import * as React from 'react';
 import { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ChecklistItem {
   id: string;
@@ -206,7 +206,7 @@ const SjekklisteVisning: React.FC = () => {
   const filteredCategories = getFilteredCategories();
 
   return (
-    <div className="min-h-screen w-full bg-[url('/bg-livingroom.png')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
+    <div className="min-h-screen w-full bg-[url('/bg-livingroom-compressed.webp')] bg-cover bg-center bg-no-repeat bg-fixed flex flex-col">
       <main className="flex-1 w-full p-3 sm:p-4 lg:p-6">
         
         {/* Header - Mer kompakt */}
