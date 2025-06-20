@@ -1,5 +1,6 @@
+import { AIBoligService } from '@boligplattform/core';
+import { AlertTriangle, ArrowRight, CheckCircle, FileText, Loader2, Upload } from "lucide-react";
 import * as React from "react";
-import { ArrowRight, FileText, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function TakstrapportAnalyse() {
@@ -42,18 +43,12 @@ export default function TakstrapportAnalyse() {
     setResult(null);
     setStep(2);
     try {
-      const formData = new FormData();
-      formData.append("file", pdfFile);
-      const res = await fetch("/api/analyse-takst", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) throw new Error("Kunne ikke analysere PDF.");
-      const data = await res.json();
+      const data = await AIBoligService.analysePDFOrText(pdfFile);
       setResult(data);
       setSuggestedTitle(data.forslagTittel || "");
       setStep(3);
-    } catch (err) {
+    } catch (err: any) {
+      console.error('PDF analyse feil:', err);
       setError("Kunne ikke lese PDF. Prøv å lime inn tekst manuelt.");
       setShowManual(true);
       setStep(1);
@@ -65,17 +60,12 @@ export default function TakstrapportAnalyse() {
     setResult(null);
     setStep(2);
     try {
-      const res = await fetch("/api/analyse-takst", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: manualText }),
-      });
-      if (!res.ok) throw new Error("Kunne ikke analysere tekst.");
-      const data = await res.json();
+      const data = await AIBoligService.analysePDFOrText(undefined, manualText);
       setResult(data);
       setSuggestedTitle(data.forslagTittel || "");
       setStep(3);
-    } catch (err) {
+    } catch (err: any) {
+      console.error('Tekst analyse feil:', err);
       setError("Kunne ikke analysere tekst. Prøv igjen.");
       setStep(1);
     }
@@ -85,7 +75,7 @@ export default function TakstrapportAnalyse() {
     e.preventDefault();
   }
 
-  // Dummy-resultat for design/demo
+  // Dummy-resultat for design/demo (hvis ingen OpenAI API key)
   const dummyResult = {
     sammendrag: "Dette er et sammendrag av takstrapporten. Boligen har noen avvik, men generelt god stand.",
     avvik: [
@@ -107,20 +97,43 @@ export default function TakstrapportAnalyse() {
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-seriflogo font-bold text-brown-900 text-center mb-4 sm:mb-6 leading-tight">
             Takstrapportanalyse
           </h2>
+          <p className="text-brown-600 text-center mb-6 text-sm sm:text-base">
+            Last opp salgsoppgave eller takstrapport for detaljert AI-analyse
+          </p>
+          
           {/* Fremgangsindikator */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 mb-6 sm:mb-8 w-full text-sm sm:text-base">
-            <div className={`flex items-center gap-2 ${step >= 1 ? 'text-green-700' : 'text-brown-400'}`}>1. Last opp</div>
+            <div className={`flex items-center gap-2 ${step >= 1 ? 'text-green-700' : 'text-brown-400'}`}>
+              <Upload className="w-4 h-4" />
+              1. Last opp
+            </div>
             <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-brown-300" />
-            <div className={`flex items-center gap-2 ${step >= 2 ? 'text-green-700' : 'text-brown-400'}`}>2. Analyser</div>
+            <div className={`flex items-center gap-2 ${step >= 2 ? 'text-green-700' : 'text-brown-400'}`}>
+              <Loader2 className="w-4 h-4" />
+              2. Analyser
+            </div>
             <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-brown-300" />
-            <div className={`flex items-center gap-2 ${step === 3 ? 'text-green-700' : 'text-brown-400'}`}>3. Få svar</div>
+            <div className={`flex items-center gap-2 ${step === 3 ? 'text-green-700' : 'text-brown-400'}`}>
+              <CheckCircle className="w-4 h-4" />
+              3. Få svar
+            </div>
           </div>
+
+          {/* Error display */}
+          {error && (
+            <div className="w-full mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                <span className="text-red-700 text-sm">{error}</span>
+              </div>
+            </div>
+          )}
 
           {/* Dropzone eller loader/resultat */}
           {step === 1 && !showManual && (
             <div className="w-full flex flex-col items-center">
               <div
-                className="w-full border-2 border-dashed border-brown-300 bg-brown-50 rounded-2xl p-4 sm:p-6 md:p-8 flex flex-col items-center justify-center cursor-pointer active:bg-brown-100 transition mb-4 min-h-[120px] sm:min-h-[160px]"
+                className="w-full border-2 border-dashed border-brown-300 bg-brown-50 rounded-2xl p-4 sm:p-6 md:p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-brown-100 transition mb-4 min-h-[120px] sm:min-h-[160px]"
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onClick={() => document.getElementById('fileInput')?.click()}
@@ -137,7 +150,7 @@ export default function TakstrapportAnalyse() {
                 />
               </div>
               <button
-                className="text-brown-500 active:text-brown-700 text-xs sm:text-sm underline"
+                className="text-brown-500 hover:text-brown-700 text-xs sm:text-sm underline transition-colors"
                 onClick={() => setShowManual(true)}
               >
                 Eller lim inn tekst manuelt
@@ -149,14 +162,14 @@ export default function TakstrapportAnalyse() {
           {step === 1 && showManual && (
             <div className="w-full flex flex-col items-center">
               <textarea
-                className="w-full min-h-[100px] sm:min-h-[120px] rounded-xl border border-brown-200 p-3 sm:p-4 mb-3 sm:mb-4 text-brown-800 bg-brown-50 focus:outline-none focus:ring-2 focus:ring-brown-400 text-sm sm:text-base"
+                className="w-full min-h-[100px] sm:min-h-[120px] rounded-xl border border-brown-200 p-3 sm:p-4 mb-3 sm:mb-4 text-brown-800 bg-brown-50 focus:outline-none focus:ring-2 focus:ring-brown-400 text-sm sm:text-base resize-y"
                 placeholder="Lim inn tekst fra PDF her..."
                 value={manualText}
                 onChange={e => setManualText(e.target.value)}
               />
               <div className="flex flex-col sm:flex-row gap-2 w-full">
                 <button
-                  className="rounded-full px-4 sm:px-6 py-3 bg-brown-500 text-white font-semibold text-base sm:text-lg hover:bg-brown-600 active:bg-brown-700 transition flex items-center gap-2 shadow w-full justify-center"
+                  className="rounded-full px-4 sm:px-6 py-3 bg-brown-500 text-white font-semibold text-base sm:text-lg hover:bg-brown-600 active:bg-brown-700 transition flex items-center gap-2 shadow w-full justify-center disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={analyseManualText}
                   disabled={!manualText.trim()}
                 >
@@ -176,7 +189,8 @@ export default function TakstrapportAnalyse() {
           {step === 2 && (
             <div className="flex flex-col items-center justify-center w-full py-8 sm:py-12">
               <Loader2 className="w-10 h-10 sm:w-12 sm:h-12 text-brown-400 animate-spin mb-4" />
-              <div className="text-brown-700 font-semibold text-base sm:text-lg">Analyserer takstrapport...</div>
+              <div className="text-brown-700 font-semibold text-base sm:text-lg">Analyserer dokument...</div>
+              <div className="text-brown-500 text-sm mt-2">Dette kan ta noen sekunder</div>
             </div>
           )}
 
@@ -212,13 +226,6 @@ export default function TakstrapportAnalyse() {
               >
                 Analyser ny rapport
               </button>
-            </div>
-          )}
-
-          {/* Feilmelding */}
-          {error && (
-            <div className="bg-red-100 text-red-700 rounded p-2 mt-4 w-full text-center text-xs sm:text-base">
-              {error}
             </div>
           )}
         </div>

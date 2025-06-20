@@ -36,6 +36,10 @@ export class AIBoligService {
     });
 
     if (!response.ok) {
+      console.error('🔌 Backend respons feil:', response.status, response.statusText);
+      if (response.status === 0 || response.status >= 500) {
+        throw new Error('Kan ikke koble til backend-server. Sjekk at serveren kjører på port 3001.');
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
@@ -198,32 +202,142 @@ export class AIBoligService {
         sammendrag: standardAnalyse.sammendrag,
         
         // Marker at vi har utført utvidet analyse
-        hasUtvidetAnalyse: true,
-        hasSalgsoppgaveAnalyse: fullAnalysisData.sources?.salgsoppgaveAnalysis && fullAnalysisData.sources.salgsoppgaveAnalysis.success,
+        hasExtendedAnalysis: true,
         
-        // **LEGG TIL METADATA OM DATAKILDE**
-        _dataKilde: prioritizedData._dataKilde || {
-          hovedkilde: 'scraping',
-          fallback: 'ingen',
-          timestamp: new Date().toISOString()
-        }
+        // **NYE FELTER FRA BACKEND-FORBEDRINGENE**
+        textAnalysis: fullAnalysisData.sources?.salgsoppgaveAnalysis?.textAnalysis,
+        needsPDFUpload: fullAnalysisData.sources?.salgsoppgaveAnalysis?.textAnalysis?.needsPDFUpload,
+        userFriendlyMessage: fullAnalysisData.sources?.salgsoppgaveAnalysis?.textAnalysis?.userFriendlyMessage,
+        documentLinks: fullAnalysisData.sources?.salgsoppgaveAnalysis?.documentLinks || [],
+        salgsoppgaveFakta: fullAnalysisData.sources?.salgsoppgaveAnalysis?.salgsoppgaveFakta || {},
+        
+        // Debug info (kun i development)
+        debugInfo: fullAnalysisData.sources?.salgsoppgaveAnalysis?.debugInfo
       };
 
-      console.log('✅ Utvidet analyse fullført, bruker data:', {
-        adresse: result.scraping_data.adresse,
-        pris: result.scraping_data.pris,
-        dataKilde: result._dataKilde
-      });
-
+      console.log('✅ Utvidet analyse fullført:', result);
       return result;
 
     } catch (error) {
       console.error('❌ Feil i utvidet analyse:', error);
       
+      // Sjekk om det er tilkoblingsproblem
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        console.error('🔌 TILKOBLINGSFEIL: Kan ikke nå backend på localhost:3001');
+        console.error('   - Sjekk at backend-serveren kjører på port 3001');
+        console.error('   - Kjør: cd apps/api/finn-scraper && node server.js');
+        throw new Error('Kan ikke koble til backend-server. Sjekk at serveren kjører på port 3001.');
+      }
+      
       // Fallback til standard analyse
-      console.log('🔄 Fallback til standard analyse');
+      console.log('🔄 Faller tilbake til standard analyse...');
       return await this.analyseBolig(url);
     }
+  }
+
+  // Ny funksjon for kun salgsoppgave-analyse (uten standard scraping)
+  static async analyseSalgsoppgave(url: string): Promise<any> {
+    console.log('📋 Starter kun salgsoppgave-analyse for:', url);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/analyse-salgsoppgave', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const salgsoppgaveData = await response.json();
+      console.log('📊 Mottatt salgsoppgave data:', salgsoppgaveData);
+
+      return salgsoppgaveData;
+
+    } catch (error) {
+      console.error('❌ Feil i salgsoppgave-analyse:', error);
+      throw error;
+    }
+  }
+
+  // Ny funksjon for å analysere opplastet PDF/tekst
+  static async analysePDFOrText(file?: File, text?: string): Promise<any> {
+    console.log('📄 Starter PDF/tekst analyse');
+
+    try {
+      const formData = new FormData();
+      
+      if (file) {
+        formData.append('file', file);
+        console.log('📁 Analyserer opplastet PDF-fil:', file.name);
+      } else if (text) {
+        // For tekst, send som JSON i stedet for FormData
+        const response = await fetch('http://localhost:3001/api/analyse-takst', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('✅ Tekst-analyse fullført:', result);
+        return result;
+      } else {
+        throw new Error('Ingen fil eller tekst oppgitt');
+      }
+
+      // For PDF-fil
+      const response = await fetch('http://localhost:3001/api/analyse-takst', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ PDF-analyse fullført:', result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Feil i PDF/tekst analyse:', error);
+      throw error;
+    }
+  }
+
+  // Hjelpefunksjon for å sjekke om en URL er gyldig Finn.no lenke
+  static isValidFinnUrl(url: string): boolean {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.includes('finn.no') && 
+             (urlObj.pathname.includes('/realestate/') || urlObj.pathname.includes('/bolig/'));
+    } catch {
+      return false;
+    }
+  }
+
+  // Hjelpefunksjon for å formatere tekstkvalitet for brukeren
+  static formatTextQuality(textAnalysis: any): string {
+    if (!textAnalysis) return 'Ukjent kvalitet';
+    
+    const qualityMap: { [key: string]: string } = {
+      'høy': '✅ Høy kvalitet - komplett analyse mulig',
+      'medium': '⚠️ Medium kvalitet - delvis analyse',
+      'lav': '⚠️ Lav kvalitet - begrenset analyse',
+      'svært lav': '❌ Svært lav kvalitet - anbefaler PDF-opplasting',
+      'ingen': '❌ Ingen tekst funnet - krever PDF-opplasting'
+    };
+
+    return qualityMap[textAnalysis.quality] || textAnalysis.quality;
   }
 
   // Hjelpefunksjon for å mappe grunnleggende data til interface
@@ -725,5 +839,66 @@ VIKTIG: Du har tilgang til all denne informasjonen. Når brukeren spør om spesi
         }
       ]
     };
+  }
+
+  // Ny funksjon for manuell PDF-upload av salgsoppgave
+  static async analyseSalgsoppgavePDF(file: File, finnUrl?: string): Promise<any> {
+    console.log('📄 Laster opp salgsoppgave-PDF for analyse:', file.name);
+    
+    try {
+      // Valider at filen er en PDF
+      if (file.type !== 'application/pdf') {
+        throw new Error('Kun PDF-filer er støttet for salgsoppgave-analyse');
+      }
+      
+      // Valider filstørrelse (maks 50MB - salgsoppgaver kan være store)
+      const maxSize = 50 * 1024 * 1024; // 50MB
+      if (file.size > maxSize) {
+        throw new Error('PDF-filen er for stor. Maksimal størrelse er 50MB.');
+      }
+      
+      console.log('✅ PDF-fil validert:', {
+        name: file.name,
+        size: `${(file.size / 1024 / 1024).toFixed(2)}MB`,
+        type: file.type
+      });
+      
+      // Opprett FormData for file upload
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      // Legg til Finn-URL hvis tilgjengelig
+      if (finnUrl) {
+        formData.append('finnUrl', finnUrl);
+        console.log('🔗 Inkluderer Finn-URL:', finnUrl);
+      }
+      
+      console.log('📤 Sender PDF til backend for analyse...');
+      
+      const response = await fetch('http://localhost:3001/api/analyse-salgsoppgave-pdf', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      console.log('✅ Salgsoppgave-PDF analyse fullført:', {
+        success: result.success,
+        textLength: result.textLength,
+        quality: result.textAnalysis?.quality,
+        hasAnalysis: !!result.analysis
+      });
+      
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Feil ved analyse av salgsoppgave-PDF:', error);
+      throw error;
+    }
   }
 } 

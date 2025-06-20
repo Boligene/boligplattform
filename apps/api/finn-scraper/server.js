@@ -20,9 +20,15 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ 
+  dest: "uploads/",
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB limit for salgsoppgaver
+  }
+});
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -385,8 +391,147 @@ async function validateDocumentForProperty(documentUrl, originalFinnUrl, page) {
   }
 }
 
+// Hjelpefunksjon for å søke etter iframe og object tags med PDF-innhold
+async function findIframeAndObjectPDFs(page) {
+  console.log('🔍 Søker etter PDF-er i iframe og object tags...');
+  
+  return await page.evaluate(() => {
+    const pdfs = [];
+    
+    // Søk etter iframe tags
+    const iframes = document.querySelectorAll('iframe');
+    iframes.forEach(iframe => {
+      const src = iframe.src || iframe.getAttribute('data-src');
+      if (src && (src.includes('.pdf') || src.includes('pdf'))) {
+        pdfs.push({
+          url: src,
+          text: iframe.title || iframe.getAttribute('aria-label') || 'PDF i iframe',
+          type: 'iframe_pdf',
+          element: 'iframe'
+        });
+        console.log('📄 Fant PDF i iframe:', src);
+      }
+    });
+    
+    // Søk etter object tags
+    const objects = document.querySelectorAll('object');
+    objects.forEach(obj => {
+      const data = obj.data || obj.getAttribute('data-src');
+      if (data && (data.includes('.pdf') || data.includes('pdf'))) {
+        pdfs.push({
+          url: data,
+          text: obj.title || obj.getAttribute('aria-label') || 'PDF i object',
+          type: 'object_pdf',
+          element: 'object'
+        });
+        console.log('📄 Fant PDF i object:', data);
+      }
+    });
+    
+    // Søk etter embed tags
+    const embeds = document.querySelectorAll('embed');
+    embeds.forEach(embed => {
+      const src = embed.src || embed.getAttribute('data-src');
+      if (src && (src.includes('.pdf') || src.includes('pdf'))) {
+        pdfs.push({
+          url: src,
+          text: embed.title || embed.getAttribute('aria-label') || 'PDF i embed',
+          type: 'embed_pdf',
+          element: 'embed'
+        });
+        console.log('📄 Fant PDF i embed:', src);
+      }
+    });
+    
+    return pdfs;
+  });
+}
+
+// Hjelpefunksjon for å "force open" PDF fra viewer-sider
+async function forceOpenPDFFromViewer(viewerUrl, browser) {
+  console.log('🔄 Forsøker å åpne PDF fra viewer-side:', viewerUrl);
+  
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+    
+    // Lytt til nettverksrespons for å fange PDF-filer
+    const pdfResponses = [];
+    page.on('response', async (response) => {
+      const url = response.url();
+      const contentType = response.headers()['content-type'] || '';
+      
+      if (contentType.includes('application/pdf') || url.includes('.pdf')) {
+        pdfResponses.push({
+          url: url,
+          contentType: contentType,
+          status: response.status()
+        });
+        console.log('📄 Fanget PDF-respons fra viewer:', url);
+      }
+    });
+    
+    await page.goto(viewerUrl, { 
+      waitUntil: 'networkidle0',
+      timeout: 20000 
+    });
+    
+    // Vent litt for å fange eventuelle PDF-er
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Søk etter PDF-er på viewer-siden
+    const viewerPDFs = await findIframeAndObjectPDFs(page);
+    
+    // Prøv å klikke på nedlastingsknapper
+    const downloadButtons = await page.evaluate(() => {
+      const buttons = [];
+      const selectors = [
+        'a[href*=".pdf"]',
+        'button[onclick*="download"]',
+        'a[download]',
+        '[class*="download"]',
+        '[id*="download"]',
+        'a[href*="download"]'
+      ];
+      
+      selectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          if (el.href || el.getAttribute('onclick')) {
+            buttons.push({
+              url: el.href || el.getAttribute('onclick'),
+              text: el.textContent.trim(),
+              type: 'download_button'
+            });
+          }
+        });
+      });
+      
+      return buttons;
+    });
+    
+    await page.close();
+    
+    // Kombiner alle funn
+    const allPDFs = [...pdfResponses, ...viewerPDFs, ...downloadButtons];
+    
+    if (allPDFs.length > 0) {
+      console.log('✅ Fant PDF-er fra viewer-side:', allPDFs.length);
+      return allPDFs;
+    } else {
+      console.log('⚠️ Ingen PDF-er funnet på viewer-siden');
+      return [];
+    }
+    
+  } catch (error) {
+    console.error('❌ Feil ved force open PDF fra viewer:', error.message);
+    return [];
+  }
+}
+
 // Forbedret funksjon for å finne salgsoppgaver via nettverkstrafikk og dokumentlenker
 async function findSalgsoppgavePDF(page, url) {
+  console.log('🔍 === STARTER UTVIDET DOKUMENTSØK ===');
   console.log('🔍 Leter etter salgsoppgave på:', url);
   const finnCode = extractFinnCode(url);
   console.log('🏷️ Finn-kode:', finnCode);
@@ -517,17 +662,49 @@ async function findSalgsoppgavePDF(page, url) {
       return lenker;
     });
     
-    dokumenter.push(...domLenker);
+    // **STEG 4**: Unngå duplisering - opprett set for å tracke URLs
+    const seenUrls = new Set();
+    const uniqueDokumenter = [];
     
-    // 3. Vent litt for å fange opp nettverkstrafikk
+    // Legg til DOM-lenker med duplikatsjekk
+    for (const dokument of domLenker) {
+      if (dokument.url && !seenUrls.has(dokument.url)) {
+        seenUrls.add(dokument.url);
+        uniqueDokumenter.push(dokument);
+      } else if (dokument.url) {
+        console.log('🚫 Hopper over duplikat dokument-URL:', dokument.url.substring(0, 80));
+      }
+    }
+    
+    dokumenter.push(...uniqueDokumenter);
+    
+    // 3. **NY FUNKSJONALITET**: Søk etter iframe/object/embed PDF-er
+    console.log('🔍 === SØKER ETTER IFRAME/OBJECT PDF-ER ===');
+    const iframePDFs = await findIframeAndObjectPDFs(page);
+    if (iframePDFs.length > 0) {
+      console.log('✅ Fant PDF-er i iframe/object tags:', iframePDFs.length);
+      
+      // **STEG 4**: Legg til iframe PDF-er med duplikatsjekk
+      for (const iframePDF of iframePDFs) {
+        if (iframePDF.url && !seenUrls.has(iframePDF.url)) {
+          seenUrls.add(iframePDF.url);
+          dokumenter.push(iframePDF);
+        } else if (iframePDF.url) {
+          console.log('🚫 Hopper over duplikat iframe PDF-URL:', iframePDF.url.substring(0, 80));
+        }
+      }
+    }
+    
+    // 4. Vent litt for å fange opp nettverkstrafikk
     console.log('⏳ Venter på nettverkstrafikk...');
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // 4. Klikk på potensielle dokumentlenker for å trigge nettverkskall (med validering)
-    for (const lenke of domLenker.slice(0, 3)) { // Test maks 3 lenker
+    // 5. **FORBEDRET**: Test dokumentlenker med force opening for viewer-sider
+    console.log('🔍 === TESTER DOKUMENTLENKER MED FORCE OPENING ===');
+    for (const lenke of domLenker.slice(0, 5)) { // Økt til 5 lenker
       if (lenke.type === 'dom_link' && lenke.url.startsWith('http')) {
         try {
-          console.log('🖱️ Tester dokumentlenke:', lenke.text);
+          console.log('🖱️ Tester dokumentlenke:', lenke.text, '|', lenke.url.substring(0, 80));
           
           // Først validér at dokumentet tilhører riktig eiendom
           const isValidDocument = await validateDocumentForProperty(lenke.url, url, page);
@@ -537,33 +714,187 @@ async function findSalgsoppgavePDF(page, url) {
             continue;
           }
           
-          // Prøv å navigere til lenken i en ny fane (simulert)
-          const linkPage = await page.browser().newPage();
-          await linkPage.goto(lenke.url, { waitUntil: 'networkidle0', timeout: 10000 });
+          // **NY LOGIKK**: Sjekk om dette ser ut til å være en viewer-side
+          const isViewerUrl = lenke.url.includes('viewer') || 
+                             lenke.url.includes('document') || 
+                             lenke.url.includes('prospekt') ||
+                             lenke.text.includes('vis dokument') ||
+                             lenke.text.includes('åpne');
           
-          // Se etter PDF-innhold eller dokument-viewer
-          const pageContent = await linkPage.content();
-          if (pageContent.includes('pdf') || pageContent.includes('document') || pageContent.includes('viewer')) {
-            dokumenter.push({
-              ...lenke,
-              type: 'verified_document_page',
-              pageContent: pageContent.substring(0, 1000) // Første 1000 tegn
+          if (isViewerUrl) {
+            console.log('🔄 Identifisert som viewer-side, forsøker force opening...');
+            const forcedPDFs = await forceOpenPDFFromViewer(lenke.url, page.browser());
+            
+            if (forcedPDFs.length > 0) {
+              forcedPDFs.forEach(pdf => {
+                                  // **STEG 4**: Legg til forced PDF-er med duplikatsjekk
+                  if (pdf.url && !seenUrls.has(pdf.url)) {
+                    seenUrls.add(pdf.url);
+                    dokumenter.push({
+                      ...pdf,
+                      originalViewerUrl: lenke.url,
+                      type: 'forced_pdf_from_viewer'
+                    });
+                  } else if (pdf.url) {
+                    console.log('🚫 Hopper over duplikat forced PDF-URL:', pdf.url.substring(0, 80));
+                  }
+              });
+              console.log('✅ Fant PDF-er via force opening:', forcedPDFs.length);
+            }
+          } else {
+            // Standard behandling for direkte lenker
+            const linkPage = await page.browser().newPage();
+            await linkPage.goto(lenke.url, { waitUntil: 'networkidle0', timeout: 15000 });
+            
+            // Se etter PDF-innhold, dokument-viewer, eller iframe/object
+            const pageAnalysis = await linkPage.evaluate(() => {
+              const hasIframe = document.querySelectorAll('iframe[src*="pdf"]').length > 0;
+              const hasObject = document.querySelectorAll('object[data*="pdf"]').length > 0;
+              const hasEmbed = document.querySelectorAll('embed[src*="pdf"]').length > 0;
+              const hasViewer = document.body.textContent.toLowerCase().includes('viewer') || 
+                               document.body.textContent.toLowerCase().includes('pdf');
+              
+              return {
+                hasIframe,
+                hasObject, 
+                hasEmbed,
+                hasViewer,
+                contentPreview: document.body.textContent.substring(0, 500)
+              };
             });
+            
+            if (pageAnalysis.hasIframe || pageAnalysis.hasObject || pageAnalysis.hasEmbed || pageAnalysis.hasViewer) {
+              console.log('📄 Side har PDF-innhold, søker etter PDF-er...');
+              
+              // Søk etter PDF-er på denne siden også
+              const sidePDFs = await findIframeAndObjectPDFs(linkPage);
+              if (sidePDFs.length > 0) {
+                // **STEG 4**: Legg til side PDF-er med duplikatsjekk
+                sidePDFs.forEach(pdf => {
+                  if (pdf.url && !seenUrls.has(pdf.url)) {
+                    seenUrls.add(pdf.url);
+                    dokumenter.push({
+                      ...pdf,
+                      originalLinkUrl: lenke.url,
+                      type: 'pdf_from_link_page'
+                    });
+                  } else if (pdf.url) {
+                    console.log('🚫 Hopper over duplikat side PDF-URL:', pdf.url.substring(0, 80));
+                  }
+                });
+                console.log('✅ Fant PDF-er på lenke-siden:', sidePDFs.length);
+              }
+              
+              // **STEG 4**: Legg til verified document page med duplikatsjekk
+              if (lenke.url && !seenUrls.has(lenke.url)) {
+                seenUrls.add(lenke.url);
+                dokumenter.push({
+                  ...lenke,
+                  type: 'verified_document_page',
+                  pageAnalysis: pageAnalysis
+                });
+              } else if (lenke.url) {
+                console.log('🚫 Hopper over duplikat verified document page-URL:', lenke.url.substring(0, 80));
+              }
+            }
+            
+            await linkPage.close();
           }
-          
-          await linkPage.close();
         } catch (error) {
-          console.log('⚠️ Kunne ikke teste lenke:', lenke.url, error.message);
+          console.log('⚠️ Feil ved testing av lenke:', lenke.url.substring(0, 50), error.message);
         }
       }
     }
     
-    // 5. Kombiner alle funn
-    const alleDokumenter = [...dokumenter, ...nettverksResponser];
+    // 6. **STEG 4**: Kombiner alle funn med duplikatsjekk for nettverksresponser
+    console.log('🔄 === KOMBINERER DOKUMENTER OG NETTVERKSRESPONSER ===');
     
-    console.log('📊 Fant totalt', alleDokumenter.length, 'potensielle dokumenter');
-    console.log('📡 Nettverksresponser:', nettverksResponser.length);
-    console.log('🔗 DOM-lenker:', domLenker.length);
+    // Legg til nettverksresponser med duplikatsjekk
+    for (const nettverksRespons of nettverksResponser) {
+      if (nettverksRespons.url && !seenUrls.has(nettverksRespons.url)) {
+        seenUrls.add(nettverksRespons.url);
+        dokumenter.push(nettverksRespons);
+      } else if (nettverksRespons.url) {
+        console.log('🚫 Hopper over duplikat nettverksrespons-URL:', nettverksRespons.url.substring(0, 80));
+      }
+    }
+    
+    // **STEG 5**: FORBEDRET LOGGING med detaljert statistikk
+    const alleDokumenter = dokumenter; // Alle er nå i dokumenter-array
+    
+    // Kategoriser dokumenter for bedre oversikt
+    const kategorier = {
+      'iframe_pdf': alleDokumenter.filter(d => d.type === 'iframe_pdf').length,
+      'object_pdf': alleDokumenter.filter(d => d.type === 'object_pdf').length,
+      'embed_pdf': alleDokumenter.filter(d => d.type === 'embed_pdf').length,
+      'forced_pdf_from_viewer': alleDokumenter.filter(d => d.type === 'forced_pdf_from_viewer').length,
+      'pdf_from_link_page': alleDokumenter.filter(d => d.type === 'pdf_from_link_page').length,
+      'dom_link': alleDokumenter.filter(d => d.type === 'dom_link').length,
+      'verified_document_page': alleDokumenter.filter(d => d.type === 'verified_document_page').length,
+      'pdf': alleDokumenter.filter(d => d.type === 'pdf').length,
+      'json': alleDokumenter.filter(d => d.type === 'json').length,
+      'base64': alleDokumenter.filter(d => d.type === 'base64').length
+    };
+    
+    // **STEG 5**: FORBEDRET LOGGING - detaljert oversikt over alle funn
+    console.log('📊 === DOKUMENTSØK KOMPLETT ===');
+    console.log('📊 Totalt funnet dokumenter (etter duplikateliminering):', alleDokumenter.length);
+    console.log('📊 Duplikater eliminert:', nettverksResponser.length + domLenker.length + (iframePDFs?.length || 0) - alleDokumenter.length);
+    
+    console.log('📊 Dokumentkategorier:');
+    Object.entries(kategorier).forEach(([type, count]) => {
+      if (count > 0) {
+        console.log(`   - ${type}: ${count}`);
+      }
+    });
+    
+    // **STEG 5**: Logg ALLE dokumentkandidater for debugging
+    if (alleDokumenter.length > 0) {
+      console.log('📄 === ALLE DOKUMENTKANDIDATER FUNNET ===');
+      alleDokumenter.forEach((dok, index) => {
+        const urlPreview = (dok.url || 'Ingen URL').substring(0, 60);
+        const textPreview = dok.text ? `(${dok.text.substring(0, 30)}...)` : '';
+        console.log(`   ${index + 1}. Type: ${dok.type}`);
+        console.log(`      URL: ${urlPreview}...`);
+        console.log(`      Tekst: ${textPreview || 'Ingen tekst'}`);
+        console.log(`      Element: ${dok.element || 'N/A'}`);
+        console.log('      ---');
+      });
+      
+      // **STEG 5**: Sammendrag av funn
+      const pdfDokumenter = alleDokumenter.filter(d => 
+        d.type === 'pdf' || 
+        d.type === 'iframe_pdf' || 
+        d.type === 'object_pdf' || 
+        d.type === 'embed_pdf' || 
+        d.type === 'forced_pdf_from_viewer' ||
+        d.type === 'pdf_from_link_page'
+      );
+      const htmlDokumenter = alleDokumenter.filter(d => 
+        d.type === 'verified_document_page' || 
+        d.type === 'html_fallback'
+      );
+      const jsonDokumenter = alleDokumenter.filter(d => d.type === 'json' || d.type === 'base64');
+      
+      console.log('📊 === SAMMENDRAG AV DOKUMENTTYPER ===');
+      console.log(`   🎯 PDF-dokumenter: ${pdfDokumenter.length} (beste kvalitet)`);
+      console.log(`   📄 HTML-dokumenter: ${htmlDokumenter.length} (fallback kvalitet)`);
+      console.log(`   📋 JSON/Data-dokumenter: ${jsonDokumenter.length}`);
+      
+      if (pdfDokumenter.length === 0) {
+        console.log('⚠️ ADVARSEL: Ingen PDF-dokumenter funnet - kun HTML/JSON tilgjengelig');
+        console.log('   Dette kan betydelig påvirke kvaliteten på analysen');
+      }
+      
+    } else {
+      console.log('❌ === INGEN DOKUMENTER FUNNET ===');
+      console.log('❌ Dette vil føre til svært begrenset analyse');
+      console.log('❌ Mulige årsaker:');
+      console.log('   - Salgsoppgave er ikke tilgjengelig offentlig');
+      console.log('   - PDF er passordbeskyttet');
+      console.log('   - Nettverksfeil eller blokkering');
+      console.log('   - Ukjent megler-struktur');
+    }
     
     return alleDokumenter;
     
@@ -573,49 +904,176 @@ async function findSalgsoppgavePDF(page, url) {
   }
 }
 
-// Funksjon for å laste ned og parse PDF
+// Forbedret funksjon for å laste ned og parse PDF med bedre feilhåndtering og cleanup
 async function downloadAndParsePDF(pdfUrl, browser) {
-  console.log('📥 Laster ned PDF:', pdfUrl);
+  console.log('📥 === LASTER NED PDF ===');
+  console.log('📥 URL:', pdfUrl);
+  
+  let page = null;
   
   try {
-    const page = await browser.newPage();
+    page = await browser.newPage();
     
     // Sett user agent for å unngå blokkering
     await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
     
+    // Økt timeout og feilhåndtering
     const response = await page.goto(pdfUrl, { 
       waitUntil: 'networkidle0',
-      timeout: 30000 
+      timeout: 45000 // Økt til 45 sekunder for store PDF-er
     });
+    
+    if (!response) {
+      throw new Error('Ingen respons fra server');
+    }
     
     if (!response.ok()) {
       throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
     }
     
+    // Sjekk content-type
+    const contentType = response.headers()['content-type'] || '';
+    if (!contentType.includes('application/pdf') && !pdfUrl.includes('.pdf')) {
+      console.log('⚠️ Content-type er ikke PDF:', contentType);
+      console.log('⚠️ Prøver likevel å parse som PDF...');
+    }
+    
     const buffer = await response.buffer();
     
     if (buffer.length === 0) {
-      throw new Error('Tom PDF fil');
+      throw new Error('Tom PDF-fil mottatt');
     }
     
-    console.log('✅ PDF lastet ned, størrelse:', buffer.length, 'bytes');
+    console.log('✅ PDF lastet ned');
+    console.log('📊 Filstørrelse:', buffer.length, 'bytes');
+    console.log('📊 Content-Type:', contentType);
     
-    // Parse PDF til tekst
-    const pdfData = await pdfParse(buffer);
-    console.log('📖 PDF tekst ekstrahert, lengde:', pdfData.text.length, 'tegn');
-    
-    await page.close();
+    // **FORBEDRET PDF PARSING MED BEDRE FEILHÅNDTERING**
+    let pdfData;
+    try {
+      pdfData = await pdfParse(buffer);
+      console.log('📖 PDF parsing fullført');
+      console.log('📊 Antall sider:', pdfData.numpages);
+      console.log('📊 Tekstlengde:', pdfData.text.length, 'tegn');
+      
+      // Sjekk om vi faktisk fikk tekst
+      if (pdfData.text.length < 50) {
+        console.log('⚠️ PDF inneholder svært lite tekst:', pdfData.text.substring(0, 100));
+        
+        // Prøv å hente metadata for mer info
+        const metadata = pdfData.info || {};
+        console.log('📊 PDF metadata:', JSON.stringify(metadata, null, 2));
+        
+        if (pdfData.text.length === 0) {
+          throw new Error('PDF inneholder ingen lesbar tekst (kan være scannet dokument eller passordbeskyttet)');
+        }
+      }
+      
+    } catch (pdfError) {
+      console.error('❌ PDF parsing feilet:', pdfError.message);
+      
+      // Prøv å gi mer spesifikk feilmelding
+      if (pdfError.message.includes('Invalid PDF')) {
+        throw new Error('Ugyldig PDF-format - filen kan være korrupt eller ikke være en ekte PDF');
+      } else if (pdfError.message.includes('Password')) {
+        throw new Error('PDF er passordbeskyttet og kan ikke leses');
+      } else {
+        throw new Error(`PDF parsing feilet: ${pdfError.message}`);
+      }
+    }
     
     return {
+      success: true,
       text: pdfData.text,
       numPages: pdfData.numpages,
       info: pdfData.info,
-      metadata: pdfData.metadata
+      metadata: pdfData.metadata,
+      source: 'pdf_download',
+      sourceUrl: pdfUrl,
+      fileSize: buffer.length
     };
     
   } catch (error) {
-    console.error('❌ Feil ved nedlasting/parsing av PDF:', error);
-    throw error;
+    console.error('❌ === PDF NEDLASTING FEILET ===');
+    console.error('❌ URL:', pdfUrl);
+    console.error('❌ Feil:', error.message);
+    console.error('❌ Type:', error.constructor.name);
+    
+    throw new Error(`PDF nedlasting/parsing feilet: ${error.message}`);
+  } finally {
+    // **STEG 4**: Alltid lukk siden for å unngå minnelekkasje
+    if (page) {
+      try {
+        await page.close();
+        console.log('🧹 PDF-side lukket');
+      } catch (closeError) {
+        console.error('⚠️ Kunne ikke lukke PDF-side:', closeError.message);
+      }
+    }
+  }
+}
+
+// **STEG 4**: Hjelpefunksjon for cleanup av midlertidige filer
+function cleanupTempFile(filePath) {
+  if (!filePath) return;
+  
+  try {
+    const fs = require('fs');
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+      console.log('🗑️ Midlertidig fil ryddet opp:', fileName);
+      return true;
+    }
+    return false;
+  } catch (cleanupError) {
+    console.error('⚠️ Kunne ikke slette midlertidig fil:', cleanupError.message);
+    return false;
+  }
+}
+
+// **STEG 4**: Funksjon for å rydde opp alle midlertidige filer fra denne økten
+function cleanupAllTempFiles() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    
+    const tempDir = os.tmpdir();
+    const files = fs.readdirSync(tempDir);
+    
+    // Finn alle bolig-scraper temp-filer
+    const boligScraperFiles = files.filter(file => 
+      file.startsWith('bolig_scraper_') || 
+      file.startsWith('temp_pdf_') ||
+      file.includes('boligplattform')
+    );
+    
+    if (boligScraperFiles.length > 0) {
+      console.log('🧹 === RYDDER OPP MIDLERTIDIGE FILER ===');
+      let cleaned = 0;
+      
+      boligScraperFiles.forEach(file => {
+        try {
+          const filePath = path.join(tempDir, file);
+          const stats = fs.statSync(filePath);
+          
+          // Slett filer som er eldre enn 1 time
+          const oneHourAgo = Date.now() - (60 * 60 * 1000);
+          if (stats.mtime.getTime() < oneHourAgo) {
+            fs.unlinkSync(filePath);
+            cleaned++;
+            console.log('🗑️ Slettet gammel temp-fil:', file);
+          }
+        } catch (error) {
+          console.error('⚠️ Kunne ikke slette:', file, error.message);
+        }
+      });
+      
+      console.log(`🧹 Ryddet opp ${cleaned} midlertidige filer`);
+    }
+  } catch (error) {
+    console.error('⚠️ Generell feil ved opprydding:', error.message);
   }
 }
 
@@ -1057,31 +1515,244 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
     
     console.log('📊 Behandler', prioriterteDokumenter.length, 'validerte dokumenter i prioritert rekkefølge');
     
+    // **STEG 5**: FORBEDRET DOKUMENTBEHANDLING MED DETALJERT LOGGING
+    let dokumentForsøk = 0;
+    const dokumentResultater = [];
+    let pdfForsøk = 0;
+    let htmlForsøk = 0;
+    let jsonForsøk = 0;
+    
     for (const dokument of prioriterteDokumenter) {
+      dokumentForsøk++;
+      
+      // **STEG 5**: Kategoriser behandlingstype for logging
+      const isPDF = ['pdf', 'iframe_pdf', 'object_pdf', 'embed_pdf', 'forced_pdf_from_viewer', 'pdf_from_link_page'].includes(dokument.type);
+      const isHTML = ['verified_document_page', 'html_fallback', 'dom_link'].includes(dokument.type);
+      const isJSON = ['json', 'base64'].includes(dokument.type);
+      
+      if (isPDF) pdfForsøk++;
+      if (isHTML) htmlForsøk++;
+      if (isJSON) jsonForsøk++;
+      
       try {
-        console.log('🔄 Prøver dokument:', dokument.type, dokument.text?.substring(0, 50) || dokument.url?.substring(0, 80));
+        console.log(`🔄 === DOKUMENT ${dokumentForsøk}/${prioriterteDokumenter.length} ===`);
+        console.log('🔄 Type:', dokument.type);
+        console.log('🔄 Kategori:', isPDF ? '📄 PDF' : isHTML ? '🌐 HTML' : isJSON ? '📋 JSON/Data' : '❓ Annet');
+        console.log('🔄 Beskrivelse:', dokument.text?.substring(0, 50) || 'N/A');
+        console.log('🔄 URL:', dokument.url?.substring(0, 80) || 'N/A');
+        console.log('🔄 Forsøksteller - PDF:', pdfForsøk, 'HTML:', htmlForsøk, 'JSON:', jsonForsøk);
         
+        const startTime = Date.now();
         const result = await processDocument(dokument, browser);
+        const processingTime = Date.now() - startTime;
         
-        if (result.success && result.text && result.text.length > 500) {
-          salgsoppgaveText = result.text;
-          source = `${result.source}: ${result.sourceUrl || dokument.url}`;
-          console.log('✅ Salgsoppgave hentet fra', result.source);
-          console.log('📄 Tekstlengde:', result.text.length, 'tegn');
-          break;
-        } else if (result.success && result.text && result.text.length > 100) {
-          // Kortere tekst, men kan være nyttig som fallback
-          if (!salgsoppgaveText) {
+        // **STEG 5**: Detaljert logging av resultatet
+        console.log(`⏱️ Behandlingstid: ${processingTime}ms`);
+        
+        // Logg resultatet for debugging med mer detaljer
+        const documentResult = {
+          index: dokumentForsøk,
+          type: dokument.type,
+          category: isPDF ? 'PDF' : isHTML ? 'HTML' : isJSON ? 'JSON' : 'Other',
+          url: dokument.url,
+          success: result.success,
+          textLength: result.text?.length || 0,
+          error: result.error,
+          processingTime: processingTime,
+          source: result.source,
+          isHtmlFallback: result.isHtmlFallback || false
+        };
+        dokumentResultater.push(documentResult);
+        
+        if (result.success && result.text) {
+          const textLength = result.text.length;
+          console.log('📊 Tekst ekstrahert:', textLength, 'tegn');
+          console.log('📊 Kilde:', result.source || 'Ukjent');
+          
+          // **STEG 5**: Logg om dette er HTML-fallback
+          if (result.isHtmlFallback) {
+            console.log('⚠️ MERK: Dette er HTML-fallback, ikke direkte PDF-innhold');
+          }
+          
+          // **BEDRE KVALITETSVURDERING AV TEKST**
+          if (textLength > 1000) {
             salgsoppgaveText = result.text;
-            source = `${result.source} (kort): ${result.sourceUrl || dokument.url}`;
-            console.log('⚠️ Kort tekst funnet fra', result.source, '- beholder som fallback');
+            source = `${result.source || dokument.type}: ${result.sourceUrl || dokument.url}`;
+            console.log('✅ HØYKVALITETS SALGSOPPGAVE FUNNET!');
+            console.log('📄 Kilde:', source);
+            console.log('📄 Tekstlengde:', textLength, 'tegn');
+            console.log('📄 Type behandling:', isPDF ? 'PDF (beste)' : isHTML ? 'HTML (fallback)' : 'JSON/Data');
+            break;
+          } else if (textLength > 300) {
+            // Medium kvalitet - behold som fallback
+            if (!salgsoppgaveText || salgsoppgaveText.length < textLength) {
+              salgsoppgaveText = result.text;
+              source = `${result.source || dokument.type} (medium): ${result.sourceUrl || dokument.url}`;
+              console.log('⚠️ MEDIUM KVALITET TEKST - beholder som fallback');
+              console.log('📄 Tekstlengde:', textLength, 'tegn');
+              console.log('📄 Type behandling:', isPDF ? 'PDF (medium)' : isHTML ? 'HTML (fallback)' : 'JSON/Data');
+            }
+          } else if (textLength > 50) {
+            // Lav kvalitet - kun hvis vi ikke har noe bedre
+            if (!salgsoppgaveText) {
+              salgsoppgaveText = result.text;
+              source = `${result.source || dokument.type} (lav kvalitet): ${result.sourceUrl || dokument.url}`;
+              console.log('⚠️ LAV KVALITET TEKST - beholder som siste utvei');
+              console.log('📄 Tekstlengde:', textLength, 'tegn');
+              console.log('📄 Type behandling:', isPDF ? 'PDF (lav)' : isHTML ? 'HTML (fallback)' : 'JSON/Data');
+            }
+          } else {
+            console.log('❌ For lite tekst ekstrahert:', textLength, 'tegn');
+            console.log('📄 Tekst preview:', result.text.substring(0, 100));
+            console.log('📄 Mulige problemer:', isPDF ? 'PDF kan være scannet eller korrupt' : isHTML ? 'HTML-side mangler innhold' : 'JSON mangler tekst-felt');
           }
         } else {
-          console.log('⚠️ Dokument ga ikke nok tekst:', result.error || 'ukjent feil');
+          // **STEG 5**: Detaljert feillogging
+          console.log('❌ === DOKUMENT-BEHANDLING FEILET ===');
+          console.log('   - Success:', result.success);
+          console.log('   - Type:', dokument.type);
+          console.log('   - Kategori:', isPDF ? 'PDF' : isHTML ? 'HTML' : 'JSON/Data');
+          console.log('   - Feil:', result.error);
+          console.log('   - Detaljer:', result.details || 'Ingen detaljer');
+          console.log('   - URL:', dokument.url?.substring(0, 100));
+          
+          // **STEG 5**: Diagnostikk basert på type
+          if (isPDF) {
+            console.log('   📄 PDF-spesifikke problemer:');
+            console.log('      - Kan være passordbeskyttet');
+            console.log('      - Kan være scannet (ikke tekstbasert)');
+            console.log('      - Nettverkstilgang kan være blokkert');
+          } else if (isHTML) {
+            console.log('   🌐 HTML-spesifikke problemer:');
+            console.log('      - Siden kan kreve JavaScript');
+            console.log('      - Innhold kan være dynamisk lastet');
+            console.log('      - Anti-scraping beskyttelse');
+          } else if (isJSON) {
+            console.log('   📋 JSON-spesifikke problemer:');
+            console.log('      - Mangler tekst-felt i JSON-struktur');
+            console.log('      - Base64-data kan være korrupt');
+          }
         }
       } catch (error) {
-        console.log('❌ Feil ved behandling av dokument:', error.message);
+        // **STEG 5**: Detaljert feilhåndtering
+        console.log('❌ === KRITISK FEIL VED BEHANDLING AV DOKUMENT ===');
+        console.log('   - Dokument index:', dokumentForsøk);
+        console.log('   - Type:', dokument.type);
+        console.log('   - Kategori:', isPDF ? 'PDF' : isHTML ? 'HTML' : 'JSON/Data');
+        console.log('   - URL:', dokument.url?.substring(0, 80));
+        console.log('   - Feil:', error.message);
+        console.log('   - Stack:', error.stack?.substring(0, 300));
+        console.log('   - Tidspunkt:', new Date().toISOString());
+        
+        dokumentResultater.push({
+          index: dokumentForsøk,
+          type: dokument.type,
+          category: isPDF ? 'PDF' : isHTML ? 'HTML' : 'JSON',
+          url: dokument.url,
+          success: false,
+          textLength: 0,
+          error: error.message,
+          processingTime: 0,
+          kritiskFeil: true
+        });
+        
         continue;
+      }
+    }
+    
+    // **STEG 5**: SAMMENDRAG-LOGGING AV HELE DOKUMENTBEHANDLINGEN
+    console.log('📊 === SAMMENDRAG AV DOKUMENTBEHANDLING ===');
+    console.log('📊 Totalt dokumenter behandlet:', dokumentResultater.length);
+    console.log('📊 Vellykkede ekstraksjoner:', dokumentResultater.filter(d => d.success).length);
+    console.log('📊 Feilede ekstraksjoner:', dokumentResultater.filter(d => !d.success).length);
+    console.log('📊 Kritiske feil:', dokumentResultater.filter(d => d.kritiskFeil).length);
+    
+    // Kategorisering av behandlede dokumenter
+    const behandledePDF = dokumentResultater.filter(d => d.category === 'PDF');
+    const behandledeHTML = dokumentResultater.filter(d => d.category === 'HTML');
+    const behandledeJSON = dokumentResultater.filter(d => d.category === 'JSON');
+    
+    console.log('📊 Behandlede PDF-dokumenter:', behandledePDF.length);
+    console.log('📊 Behandlede HTML-dokumenter:', behandledeHTML.length);
+    console.log('📊 Behandlede JSON-dokumenter:', behandledeJSON.length);
+    
+    // **STEG 5**: Detaljert oversikt over hva som fungerte
+    const vellykkedePDF = behandledePDF.filter(d => d.success && d.textLength > 0);
+    const vellykkdeHTML = behandledeHTML.filter(d => d.success && d.textLength > 0);
+    const vellykkdeJSON = behandledeJSON.filter(d => d.success && d.textLength > 0);
+    
+    console.log('📊 === VELLYKKEDE EKSTRAKSJONER ===');
+    console.log('✅ PDF-ekstraksjoner:', vellykkedePDF.length);
+    console.log('✅ HTML-ekstraksjoner (fallback):', vellykkdeHTML.length);
+    console.log('✅ JSON-ekstraksjoner:', vellykkdeJSON.length);
+    
+    // Logg beste resultat per kategori
+    if (vellykkedePDF.length > 0) {
+      const bestePDF = vellykkedePDF.reduce((best, current) => 
+        current.textLength > best.textLength ? current : best
+      );
+      console.log('🏆 Beste PDF-resultat:', bestePDF.textLength, 'tegn fra', bestePDF.type);
+    }
+    
+    if (vellykkdeHTML.length > 0) {
+      const besteHTML = vellykkdeHTML.reduce((best, current) => 
+        current.textLength > best.textLength ? current : best
+      );
+      console.log('🏆 Beste HTML-resultat:', besteHTML.textLength, 'tegn fra', besteHTML.type);
+    }
+    
+    // **STEG 5**: Detaljerte resultater
+    console.log('📊 === DETALJERTE RESULTATER ===');
+    dokumentResultater.forEach((result, index) => {
+      const status = result.success ? '✅' : '❌';
+      const kategori = result.category || 'N/A';
+      const feilInfo = result.error ? ` (${result.error})` : '';
+      const kritisk = result.kritiskFeil ? ' [KRITISK]' : '';
+      console.log(`   ${index + 1}. ${status} ${kategori}/${result.type}: ${result.textLength} tegn${feilInfo}${kritisk}`);
+    });
+    
+    // **STEG 5**: Logg hovedresultat
+    console.log('📊 === HOVEDRESULTAT ===');
+    console.log('📊 Salgsoppgave-tekst funnet:', !!salgsoppgaveText);
+    if (salgsoppgaveText) {
+      console.log('📄 Tekstlengde:', salgsoppgaveText.length, 'tegn');
+      console.log('📄 Kilde:', source);
+      console.log('📄 Kvalitetsnivå:', 
+        salgsoppgaveText.length > 3000 ? 'UTMERKET (>3000)' :
+        salgsoppgaveText.length > 1000 ? 'HØYKVALITET (>1000)' :
+        salgsoppgaveText.length > 300 ? 'MEDIUM (>300)' :
+        salgsoppgaveText.length > 50 ? 'LAV (>50)' : 'SVÆRT LAV (<50)'
+      );
+    } else {
+      console.log('❌ INGEN SALGSOPPGAVE-TEKST FUNNET');
+      console.log('❌ Dette vil føre til begrenset analyse');
+    }
+    
+    // **STEG 5**: Logg problemer som oppstod
+    const problemer = dokumentResultater.filter(d => !d.success);
+    if (problemer.length > 0) {
+      console.log('⚠️ === PROBLEMER SOM OPPSTOD ===');
+      problemer.forEach((problem, index) => {
+        console.log(`   ${index + 1}. ${problem.type} (${problem.category}): ${problem.error}`);
+      });
+      
+      // **STEG 5**: Forslag til forbedringer
+      console.log('💡 === FORSLAG TIL FORBEDRINGER ===');
+      const pdfProblemer = problemer.filter(p => p.category === 'PDF').length;
+      const htmlProblemer = problemer.filter(p => p.category === 'HTML').length;
+      
+      if (pdfProblemer > 0) {
+        console.log('   📄 PDF-problemer kan løses ved:');
+        console.log('      - Sjekke om PDF-er krever autentisering');
+        console.log('      - Forbedre PDF-parsing for scannede dokumenter');
+        console.log('      - Implementere bedre nettverkshåndtering');
+      }
+      
+      if (htmlProblemer > 0) {
+        console.log('   🌐 HTML-problemer kan løses ved:');
+        console.log('      - Vente lengre på JavaScript-loading');
+        console.log('      - Forbedre CSS-selector for innhold');
+        console.log('      - Håndtere mer dynamisk innhold');
       }
     }
     
@@ -1338,21 +2009,108 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
       };
     }
     
-    return {
-      success: true,
-      source: source,
-      documentLinks: documentLinks,
-      textLength: salgsoppgaveText.length,
-      analysis: analysis,
-      rawText: process.env.NODE_ENV === 'development' ? salgsoppgaveText.substring(0, 2000) : undefined,
-      // **HOVEDDATA FRA SALGSOPPGAVE (PRIORITERES OVER SCRAPING)**
-      salgsoppgaveFakta: salgsoppgaveFakta,
-      // Legg til et sammendrag av viktig informasjon for chat-bot
-      detailedInfo: salgsoppgaveText ? extractDetailedInfo(salgsoppgaveText) : null
+    // **STEG 3**: FORBEDRET RETUR-LOGIKK MED KVALITETSVURDERING OG PDF-UPLOAD ANBEFALING
+    const textQuality = salgsoppgaveText ? 
+      (salgsoppgaveText.length > 3000 ? 'høy' : 
+       salgsoppgaveText.length > 1000 ? 'medium' : 
+       salgsoppgaveText.length > 300 ? 'lav' : 'svært lav') : 'ingen';
+    
+    // **STEG 3**: Sjekk om vi trenger PDF-upload (mindre enn 3000 tegn)
+    const needsPDFUpload = !salgsoppgaveText || salgsoppgaveText.length < 3000;
+    
+    const textAnalysis = {
+      hasText: !!salgsoppgaveText,
+      textLength: salgsoppgaveText?.length || 0,
+      quality: textQuality,
+      sufficientForAnalysis: salgsoppgaveText && salgsoppgaveText.length > 300,
+      recommendAIAnalysis: salgsoppgaveText && salgsoppgaveText.length > 1000,
+      warningMessage: null,
+      // **STEG 3**: Ny flagg for PDF-upload anbefaling
+      needsPDFUpload: needsPDFUpload,
+      userFriendlyMessage: null
     };
+    
+    // **STEG 3**: Generer advarsler og brukervennlige beskjeder basert på tekst-kvalitet
+    if (!salgsoppgaveText) {
+      textAnalysis.warningMessage = "Ingen salgsoppgave-tekst funnet. AI-analyse vil være svært begrenset.";
+      textAnalysis.userFriendlyMessage = "Vi fant ikke nok informasjon i salgsoppgaven automatisk. For en komplett analyse, last opp PDF direkte.";
+    } else if (textAnalysis.textLength < 3000) {
+      if (textAnalysis.quality === 'svært lav') {
+        textAnalysis.warningMessage = `Svært lite tekst funnet (${textAnalysis.textLength} tegn). AI-analyse kan være meget unøyaktig.`;
+        textAnalysis.userFriendlyMessage = "Vi fant svært lite informasjon i salgsoppgaven automatisk. For en komplett analyse, last opp PDF direkte.";
+      } else if (textAnalysis.quality === 'lav') {
+        textAnalysis.warningMessage = `Begrenset tekst funnet (${textAnalysis.textLength} tegn). AI-analyse kan mangle viktige detaljer.`;
+        textAnalysis.userFriendlyMessage = "Vi fant begrenset informasjon i salgsoppgaven automatisk. For en mer detaljert analyse, last opp PDF direkte.";
+      } else if (textAnalysis.quality === 'medium') {
+        textAnalysis.warningMessage = `Moderat mengde tekst funnet (${textAnalysis.textLength} tegn). AI-analyse bør være brukbar, men kan mangle noen detaljer.`;
+        textAnalysis.userFriendlyMessage = "Vi fant moderat informasjon i salgsoppgaven. For en mer komplett analyse, vurder å laste opp PDF direkte.";
+      }
+    } else {
+      // Tilstrekkelig tekst funnet
+      textAnalysis.warningMessage = null;
+      textAnalysis.userFriendlyMessage = null;
+    }
+    
+    console.log('📊 === TEKSTKVALITET VURDERING ===');
+    console.log('📊 Tekst tilgjengelig:', textAnalysis.hasText);
+    console.log('📊 Tekstlengde:', textAnalysis.textLength);
+    console.log('📊 Kvalitet:', textAnalysis.quality);
+    console.log('📊 Tilstrekkelig for analyse:', textAnalysis.sufficientForAnalysis);
+    console.log('📊 Anbefaler AI-analyse:', textAnalysis.recommendAIAnalysis);
+    if (textAnalysis.warningMessage) {
+      console.log('⚠️ Advarsel:', textAnalysis.warningMessage);
+    }
+    
+    const returnData = {
+      success: true,
+      source: source || 'Ingen gyldig kilde funnet',
+      documentLinks: documentLinks || [],
+      
+      // **NY**: Detaljert tekstanalyse for frontend
+      textAnalysis: textAnalysis,
+      
+      // Legacy fields (behold for bakoverkompatibilitet)
+      textLength: salgsoppgaveText?.length || 0,
+      
+      analysis: analysis,
+      rawText: process.env.NODE_ENV === 'development' ? salgsoppgaveText?.substring(0, 2000) : undefined,
+      
+      // **HOVEDDATA FRA SALGSOPPGAVE (PRIORITERES OVER SCRAPING)**
+      salgsoppgaveFakta: salgsoppgaveFakta || {},
+      
+      // Legg til et sammendrag av viktig informasjon for chat-bot
+      detailedInfo: salgsoppgaveText ? extractDetailedInfo(salgsoppgaveText) : null,
+      
+      // **NY**: Debugging info (kun i development)
+      debugInfo: process.env.NODE_ENV === 'development' ? {
+        dokumentResultater: dokumentResultater || [],
+        prioriterteDokumenter: prioriterteDokumenter?.length || 0,
+        validatedDocuments: validatedDocuments?.length || 0
+      } : undefined
+    };
+    
+    // Logg final resultat
+    console.log('📊 === SALGSOPPGAVE ANALYSE KOMPLETT ===');
+    console.log('✅ Success:', returnData.success);
+    console.log('📊 Kilde:', returnData.source);
+    console.log('📊 Dokumenter funnet:', returnData.documentLinks.length);
+    console.log('📊 Tekstkvalitet:', returnData.textAnalysis.quality);
+    console.log('📊 AI-analyse:', returnData.analysis ? 'Tilgjengelig' : 'Ikke tilgjengelig');
+    console.log('📊 Salgsoppgave fakta:', Object.keys(returnData.salgsoppgaveFakta).length, 'felter');
+    
+    // **STEG 4**: Rydd opp midlertidige filer før retur
+    console.log('🧹 Rydder opp midlertidige filer...');
+    cleanupAllTempFiles();
+    
+    return returnData;
     
   } catch (error) {
     console.error('❌ Feil i salgsoppgave-analyse:', error);
+    
+    // **STEG 4**: Rydd opp midlertidige filer også ved feil
+    console.log('🧹 Rydder opp midlertidige filer (etter feil)...');
+    cleanupAllTempFiles();
+    
     return {
       success: false,
       error: error.message,
@@ -1363,26 +2121,70 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
   }
 }
 
-// Forbedret funksjon for å håndtere ulike dokumenttyper
+// Forbedret funksjon for å håndtere ulike dokumenttyper inkludert nye iframe/object/forced typer
 async function processDocument(dokument, browser) {
-  console.log('🔄 Behandler dokument:', dokument.type, dokument.url?.substring(0, 100));
+  console.log('🔄 === BEHANDLER DOKUMENT ===');
+  console.log('🔄 Type:', dokument.type);
+  console.log('🔄 URL:', dokument.url?.substring(0, 100) || 'N/A');
+  console.log('🔄 Tekst:', dokument.text?.substring(0, 50) || 'N/A');
   
   try {
     // Håndter forskjellige dokumenttyper
     switch (dokument.type) {
       case 'pdf':
+        console.log('📄 Behandler direkte PDF-respons...');
+        return await downloadAndParsePDF(dokument.url, browser);
+      
+      case 'iframe_pdf':
+      case 'object_pdf':
+      case 'embed_pdf':
+        console.log('📄 Behandler PDF fra iframe/object/embed...');
+        return await downloadAndParsePDF(dokument.url, browser);
+      
+      case 'forced_pdf_from_viewer':
+        console.log('📄 Behandler PDF som ble forced fra viewer...');
+        if (dokument.url) {
+          return await downloadAndParsePDF(dokument.url, browser);
+        } else {
+          return { success: false, error: 'Ingen URL for forced PDF' };
+        }
+      
+      case 'pdf_from_link_page':
+        console.log('📄 Behandler PDF funnet på lenke-side...');
         return await downloadAndParsePDF(dokument.url, browser);
       
       case 'base64':
+        console.log('📦 Behandler base64-encoded PDF...');
         return await parseBase64PDF(dokument.data);
       
       case 'json':
+        console.log('📋 Behandler JSON-respons...');
         return await extractTextFromJSON(dokument.data, dokument.url);
       
       case 'verified_document_page':
-        return await extractTextFromDocumentPage(dokument.pageContent, dokument.url);
+        console.log('🌐 Behandler verifisert dokumentside...');
+        if (dokument.pageAnalysis) {
+          // Ny logikk: hvis siden har PDF-elementer, prøv å hente dem først
+          if (dokument.pageAnalysis.hasIframe || dokument.pageAnalysis.hasObject || dokument.pageAnalysis.hasEmbed) {
+            console.log('🔄 Dokumentside har PDF-elementer, prøver direct extraction...');
+            // Forsøk å behandle som viewer-side først
+            const forcedResult = await forceOpenPDFFromViewer(dokument.url, browser);
+            if (forcedResult.length > 0 && forcedResult[0].url) {
+              return await downloadAndParsePDF(forcedResult[0].url, browser);
+            }
+          }
+          
+          // **STEG 2**: Fallback til forbedret tekstekstraksjon fra siden med browser-support
+          return await extractTextFromDocumentPage(dokument.pageAnalysis.contentPreview, dokument.url, browser);
+        } else if (dokument.pageContent) {
+          // **STEG 2**: Legacy support med browser-parameter
+          return await extractTextFromDocumentPage(dokument.pageContent, dokument.url, browser);
+        } else {
+          return await downloadAndParseDocumentPage(dokument.url, browser);
+        }
       
       case 'dom_link':
+        console.log('🔗 Behandler DOM-lenke...');
         // Prøv først som PDF, så som dokumentside
         if (dokument.url.includes('.pdf')) {
           return await downloadAndParsePDF(dokument.url, browser);
@@ -1390,13 +2192,22 @@ async function processDocument(dokument, browser) {
           return await downloadAndParseDocumentPage(dokument.url, browser);
         }
       
+      case 'download_button':
+        console.log('📥 Behandler nedlastingsknapp...');
+        if (dokument.url && dokument.url.includes('.pdf')) {
+          return await downloadAndParsePDF(dokument.url, browser);
+        } else {
+          return { success: false, error: 'Nedlastingsknapp peker ikke på PDF' };
+        }
+      
       default:
         console.log('⚠️ Ukjent dokumenttype:', dokument.type);
-        return { success: false, error: 'Ukjent dokumenttype' };
+        return { success: false, error: `Ukjent dokumenttype: ${dokument.type}` };
     }
   } catch (error) {
     console.error('❌ Feil ved behandling av dokument:', error.message);
-    return { success: false, error: error.message };
+    console.error('❌ Stack trace:', error.stack?.substring(0, 500));
+    return { success: false, error: error.message, details: error.stack?.substring(0, 200) };
   }
 }
 
@@ -1517,7 +2328,7 @@ async function extractTextFromJSON(jsonData, url) {
   }
 }
 
-// Funksjon for å laste ned og parse dokumentsider
+// **STEG 2**: Funksjon for å laste ned og parse dokumentsider med PDF-støtte
 async function downloadAndParseDocumentPage(url, browser) {
   console.log('🌐 Laster ned dokumentside:', url);
   
@@ -1531,7 +2342,8 @@ async function downloadAndParseDocumentPage(url, browser) {
     });
     
     const pageContent = await page.content();
-    const result = await extractTextFromDocumentPage(pageContent, url);
+    // **STEG 2**: Send browser-instans til extractTextFromDocumentPage for PDF-støtte
+    const result = await extractTextFromDocumentPage(pageContent, url, browser);
     
     await page.close();
     return result;
@@ -1542,17 +2354,115 @@ async function downloadAndParseDocumentPage(url, browser) {
   }
 }
 
-// Forbedret funksjon for å ekstrahere tekst fra dokumentsider
-async function extractTextFromDocumentPage(pageContent, url) {
-  console.log('📄 Ekstraherer tekst fra dokumentside');
+// **STEG 2**: Forbedret funksjon for å ekstrahere tekst fra dokumentsider med PDF-støtte
+async function extractTextFromDocumentPage(pageContent, url, browser = null) {
+  console.log('📄 === EKSTRAHERER TEKST FRA DOKUMENTSIDE ===');
+  console.log('📄 URL:', url);
   
   try {
-    // Bruk cheerio eller lignende for å parse HTML
+    // **NYT**: Bruk cheerio for å parse HTML og se etter PDF-er
     const cheerio = require('cheerio');
     const $ = cheerio.load(pageContent);
     
+    // **STEG 2**: Sjekk først om det finnes iframe eller object med PDF
+    console.log('🔍 Søker etter PDF i iframe/object tags...');
+    const pdfElements = [];
+    
+    // Søk etter iframe med PDF
+    $('iframe').each((index, element) => {
+      const src = $(element).attr('src') || $(element).attr('data-src');
+      const title = $(element).attr('title') || $(element).attr('aria-label') || '';
+      
+      if (src && (src.includes('.pdf') || src.includes('pdf') || title.toLowerCase().includes('pdf'))) {
+        pdfElements.push({
+          type: 'iframe_pdf',
+          url: src.startsWith('http') ? src : new URL(src, url).href,
+          title: title,
+          element: 'iframe'
+        });
+        console.log('📄 Fant PDF i iframe:', src);
+      }
+    });
+    
+    // Søk etter object med PDF
+    $('object').each((index, element) => {
+      const data = $(element).attr('data') || $(element).attr('data-src');
+      const type = $(element).attr('type') || '';
+      
+      if (data && (data.includes('.pdf') || data.includes('pdf') || type.includes('pdf'))) {
+        pdfElements.push({
+          type: 'object_pdf',
+          url: data.startsWith('http') ? data : new URL(data, url).href,
+          title: type,
+          element: 'object'
+        });
+        console.log('📄 Fant PDF i object:', data);
+      }
+    });
+    
+    // Søk etter embed med PDF
+    $('embed').each((index, element) => {
+      const src = $(element).attr('src') || $(element).attr('data-src');
+      const type = $(element).attr('type') || '';
+      
+      if (src && (src.includes('.pdf') || src.includes('pdf') || type.includes('pdf'))) {
+        pdfElements.push({
+          type: 'embed_pdf',
+          url: src.startsWith('http') ? src : new URL(src, url).href,
+          title: type,
+          element: 'embed'
+        });
+        console.log('📄 Fant PDF i embed:', src);
+      }
+    });
+    
+    // **STEG 2**: Hvis vi fant PDF-elementer, prøv å laste ned PDF-en direkte
+    if (pdfElements.length > 0 && browser) {
+      console.log('🎯 Fant', pdfElements.length, 'PDF-elementer, prøver direkte PDF-nedlasting...');
+      
+      for (const pdfElement of pdfElements) {
+        try {
+          console.log(`📥 Forsøker å laste ned PDF fra ${pdfElement.element}: ${pdfElement.url}`);
+          
+          // Bruk eksisterende downloadAndParsePDF funksjon
+          const pdfResult = await downloadAndParsePDF(pdfElement.url, browser);
+          
+          if (pdfResult.success && pdfResult.text && pdfResult.text.length > 100) {
+            console.log('✅ SUKSESS: PDF lastet ned og parsert fra dokumentside!');
+            console.log('📊 Tekstlengde fra PDF:', pdfResult.text.length, 'tegn');
+            
+            return {
+              success: true,
+              text: pdfResult.text,
+              source: `pdf_from_${pdfElement.element}`,
+              sourceUrl: pdfElement.url,
+              originalDocumentUrl: url,
+              numPages: pdfResult.numPages,
+              fileSize: pdfResult.fileSize
+            };
+          } else {
+            console.log('⚠️ PDF-nedlasting feilet:', pdfResult.error);
+          }
+          
+        } catch (pdfError) {
+          console.log('❌ Feil ved PDF-nedlasting fra', pdfElement.element, ':', pdfError.message);
+          continue; // Prøv neste PDF-element
+        }
+      }
+      
+      console.log('⚠️ Alle PDF-nedlastinger feilet, faller tilbake til HTML-parsing');
+    } else if (pdfElements.length > 0) {
+      console.log('⚠️ Fant PDF-elementer men mangler browser-instans for nedlasting');
+    } else {
+      console.log('ℹ️ Ingen PDF-elementer funnet, bruker HTML-parsing');
+    }
+    
+    // **STEG 2**: Fallback til HTML-tekstekstraksjon (eksisterende logikk)
+    console.log('📄 === FALLBACK: BRUKER HTML-TEKSTEKSTRAKSJON ===');
+    console.log('⚠️ Dette er fallback-metode - kan mangle viktig informasjon fra PDF');
+    
     // Fjern ikke-relevante elementer
-    $('script, style, nav, header, footer, .cookie-banner, .ad, .navigation').remove();
+    $('script, style, nav, header, footer, .cookie-banner, .ad, .navigation, .menu').remove();
     
     // Hent tekst fra hovedinnhold
     let text = '';
@@ -1565,13 +2475,16 @@ async function extractTextFromDocumentPage(pageContent, url) {
       '.document-viewer',
       '.article-content',
       'article',
-      '.main-content'
+      '.main-content',
+      '.document-container',
+      '.pdf-container'
     ];
     
     for (const selector of contentSelectors) {
       const element = $(selector);
       if (element.length > 0) {
         text = element.text();
+        console.log(`📄 Hentet tekst fra selector: ${selector} (${text.length} tegn)`);
         break;
       }
     }
@@ -1579,6 +2492,7 @@ async function extractTextFromDocumentPage(pageContent, url) {
     // Fallback til body hvis ingen hovedinnhold funnet
     if (!text || text.length < 100) {
       text = $('body').text();
+      console.log('📄 Fallback til body-tekst:', text.length, 'tegn');
     }
     
     // Rens teksten
@@ -1587,21 +2501,31 @@ async function extractTextFromDocumentPage(pageContent, url) {
       .replace(/\n+/g, '\n')
       .trim();
     
-    if (cleanedText.length > 100) {
-      console.log('✅ Ekstraherte tekst fra dokumentside, lengde:', cleanedText.length);
+    if (cleanedText.length > 50) {
+      console.log('✅ HTML-tekstekstraksjon fullført');
+      console.log('📊 Renset tekstlengde:', cleanedText.length, 'tegn');
+      console.log('⚠️ MERK: Dette er HTML-fallback, ikke PDF-innhold');
+      
       return {
         success: true,
         text: cleanedText,
-        source: 'document_page',
-        sourceUrl: url
+        source: 'html_fallback',
+        sourceUrl: url,
+        isHtmlFallback: true, // **NYT**: Flagg for å indikere at dette er fallback
+        warning: 'Tekst hentet fra HTML-fallback, ikke direkte fra PDF'
       };
     } else {
-      throw new Error('For lite innhold funnet på dokumentsiden');
+      throw new Error('For lite innhold funnet på dokumentsiden (HTML-fallback)');
     }
     
   } catch (error) {
     console.error('❌ Feil ved tekstekstraksjon fra dokumentside:', error.message);
-    return { success: false, error: error.message };
+    console.error('📄 URL som feilet:', url);
+    return { 
+      success: false, 
+      error: error.message,
+      sourceUrl: url
+    };
   }
 }
 
@@ -2414,4 +3338,270 @@ app.get("/api/ping", (req, res) => {
 const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Express-server kjører på http://localhost:${PORT}`);
+});
+
+// Nytt endpoint for manuell PDF-upload av salgsoppgave
+app.post("/api/analyse-salgsoppgave-pdf", (req, res, next) => {
+  if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
+    upload.single('file')(req, res, next);
+  } else {
+    next();
+  }
+}, async (req, res) => {
+  console.log("📄 Mottok request til /api/analyse-salgsoppgave-pdf");
+  
+  try {
+    let tekst = "";
+    let finnUrl = "";
+    
+    if (req.file) {
+      // PDF-opplasting
+      try {
+        const dataBuffer = fs.readFileSync(req.file.path);
+        const pdfData = await pdfParse(dataBuffer);
+        tekst = pdfData.text;
+        
+        // **STEG 4**: Rydd opp midlertidig fil
+        fs.unlinkSync(req.file.path);
+        console.log("📄 PDF-tekstlengde:", tekst.length);
+        console.log("🗑️ Midlertidig PDF-fil slettet");
+      } catch (pdfErr) {
+        console.error("❌ Feil ved pdf-parse:", pdfErr);
+        
+        // **STEG 4**: Rydd opp midlertidig fil selv ved feil
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+          try {
+            fs.unlinkSync(req.file.path);
+            console.log("🗑️ Midlertidig PDF-fil slettet (etter feil)");
+          } catch (cleanupErr) {
+            console.error("⚠️ Kunne ikke slette midlertidig fil:", cleanupErr.message);
+          }
+        }
+        
+        return res.status(400).json({ 
+          success: false,
+          error: "Feil ved lesing av PDF. Kontroller at filen er en gyldig PDF.", 
+          details: pdfErr.message 
+        });
+      }
+    } else if (req.body.text) {
+      // Manuell tekst (fallback)
+      tekst = req.body.text;
+      console.log("📝 Manuell tekstlengde:", tekst.length);
+    } else {
+      return res.status(400).json({ 
+        success: false,
+        error: "Ingen PDF eller tekst mottatt. Last opp en PDF-fil." 
+      });
+    }
+
+    // Hent Finn-URL fra request body hvis tilgjengelig
+    if (req.body.finnUrl) {
+      finnUrl = req.body.finnUrl;
+      console.log("🔗 Finn-URL mottatt:", finnUrl);
+    }
+
+    // Valider tekst
+    if (!tekst || tekst.length < 50) {
+      console.warn("⚠️ For kort eller tom tekst fra PDF.", { tekstlengde: tekst.length });
+      return res.status(400).json({ 
+        success: false,
+        error: "Kunne ikke lese tekst fra PDF eller tekst er for kort. Kontroller at PDF-en inneholder lesbar tekst.", 
+        tekstlengde: tekst.length 
+      });
+    }
+
+    console.log("✅ Gyldig salgsoppgave-tekst mottatt, starter analyse...");
+
+    // **EKSTRAHER STRUKTURERTE FAKTA FRA SALGSOPPGAVE (HOVEDKILDE)**
+    console.log('📊 === EKSTRAHERER STRUKTURERTE FAKTA FRA OPPLASTET SALGSOPPGAVE ===');
+    const salgsoppgaveFakta = extractSalgsoppgaveFakta(tekst);
+    console.log('✅ Salgsoppgave-fakta ekstrahert:', Object.keys(salgsoppgaveFakta));
+
+    // Ekstraher detaljert info for chat-bot
+    const detailedInfo = extractDetailedInfo(tekst);
+    console.log('✅ Detaljert info ekstrahert:', Object.keys(detailedInfo));
+
+    // **STEG 3**: Vurder tekstkvalitet og behov for ytterligere informasjon
+    const textQuality = tekst.length > 3000 ? 'høy' : 
+                       tekst.length > 1000 ? 'medium' : 
+                       tekst.length > 300 ? 'lav' : 'svært lav';
+    
+    const needsMoreInfo = tekst.length < 3000;
+    
+    const textAnalysis = {
+      hasText: true,
+      textLength: tekst.length,
+      quality: textQuality,
+      sufficientForAnalysis: tekst.length > 300,
+      recommendAIAnalysis: tekst.length > 1000,
+      needsPDFUpload: false, // Ikke relevant siden vi allerede har PDF
+      userFriendlyMessage: needsMoreInfo ? 
+        "PDF-en er lastet opp, men inneholder begrenset informasjon. Analysen kan mangle noen detaljer." : 
+        null,
+      source: 'manual_pdf_upload'
+    };
+
+    // OpenAI-analyse hvis API-nøkkel er tilgjengelig
+    let analysis = null;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    
+    if (openaiApiKey && tekst.length > 100) {
+      console.log('🤖 Sender til OpenAI for salgsoppgave-analyse...');
+      console.log('📊 Tekst lengde:', tekst.length, 'tegn');
+      
+      try {
+        // Bygg utvidet prompt med strukturerte fakta
+        let strukturerteFakta = '';
+        if (Object.keys(salgsoppgaveFakta).length > 0) {
+          strukturerteFakta = `\n\n**STRUKTURERTE FAKTA EKSTRAHERT FRA SALGSOPPGAVE (prioriter denne informasjonen):**\n`;
+          for (const [key, value] of Object.entries(salgsoppgaveFakta)) {
+            strukturerteFakta += `- ${key}: ${value}\n`;
+          }
+          strukturerteFakta += `\n**VIKTIG:** Bruk disse strukturerte fakta som hovedkilde i din analyse.\n`;
+        }
+        
+        const fullPrompt = `Analyser denne salgsoppgaven som ble lastet opp manuelt:${strukturerteFakta}\n\n**FULL SALGSOPPGAVE-TEKST:**\n${tekst.substring(0, 10000)}`;
+        
+        const completion = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt
+            },
+            {
+              role: "user", 
+              content: fullPrompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 2000
+        });
+        
+        const responseContent = completion.choices[0].message.content;
+        
+        try {
+          // Prøv å parse direkte først
+          analysis = JSON.parse(responseContent);
+          console.log('✅ OpenAI salgsoppgave-analyse fullført (direkte parsing)');
+        } catch (parseError) {
+          console.log('⚠️ Direkte parsing feilet, prøver å finne JSON i respons');
+          
+          // Prøv å finne JSON innenfor markdown code blocks
+          let jsonString = responseContent;
+          jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+          
+          const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              analysis = JSON.parse(jsonMatch[0]);
+              console.log('✅ OpenAI salgsoppgave-analyse fullført (ekstrahert JSON)');
+            } catch (secondParseError) {
+              console.log('⚠️ Kunne ikke parse JSON fra OpenAI, bruker rå respons');
+              analysis = {
+                raaAnalyse: responseContent,
+                feil: 'Kunne ikke parse JSON fra OpenAI-respons'
+              };
+            }
+          } else {
+            console.log('⚠️ Ingen JSON funnet i OpenAI respons, bruker rå respons');
+            analysis = {
+              raaAnalyse: responseContent,
+              feil: 'Ingen JSON funnet i OpenAI-respons'
+            };
+          }
+        }
+        
+      } catch (openaiError) {
+        console.error('❌ OpenAI API feil:', openaiError);
+        analysis = {
+          feil: `OpenAI API feil: ${openaiError.message}`,
+          tekst: tekst.substring(0, 1000) + '...'
+        };
+      }
+    } else if (!openaiApiKey) {
+      console.log('⚠️ Ingen OpenAI API-nøkkel, returnerer kun ekstraherte data');
+      analysis = {
+        feil: 'Ingen OpenAI API-nøkkel konfigurert',
+        tekst: tekst.substring(0, 1000) + '...'
+      };
+    } else {
+      analysis = {
+        feil: 'Tekst for kort for AI-analyse',
+        tekst: tekst
+      };
+    }
+
+    const result = {
+      success: true,
+      source: 'manual_pdf_upload',
+      uploadedAt: new Date().toISOString(),
+      finnUrl: finnUrl || null,
+      
+      // **TEKSTANALYSE**
+      textAnalysis: textAnalysis,
+      textLength: tekst.length,
+      
+      // **AI-ANALYSE**
+      analysis: analysis,
+      
+      // **HOVEDDATA FRA SALGSOPPGAVE**
+      salgsoppgaveFakta: salgsoppgaveFakta,
+      
+      // **DETALJERT INFO FOR CHAT-BOT**
+      detailedInfo: detailedInfo,
+      
+      // **RAW TEXT (kun i development)**
+      rawText: process.env.NODE_ENV === 'development' ? tekst.substring(0, 2000) : undefined,
+      
+      // **METADATA**
+      metadata: {
+        processingMethod: 'manual_pdf_upload',
+        textQuality: textQuality,
+        hasAIAnalysis: !!analysis && !analysis.feil,
+        extractedFactsCount: Object.keys(salgsoppgaveFakta).length,
+        detailedInfoCount: Object.keys(detailedInfo).length
+      }
+    };
+
+    console.log('📊 === MANUELL SALGSOPPGAVE-ANALYSE KOMPLETT ===');
+    console.log('✅ Success:', result.success);
+    console.log('📊 Kilde:', result.source);
+    console.log('📊 Tekstkvalitet:', result.textAnalysis.quality);
+    console.log('📊 AI-analyse:', result.analysis ? 'Tilgjengelig' : 'Ikke tilgjengelig');
+    console.log('📊 Salgsoppgave fakta:', Object.keys(result.salgsoppgaveFakta).length, 'felter');
+    console.log('📊 Detaljert info:', Object.keys(result.detailedInfo).length, 'felter');
+    
+    // **STEG 4**: Rydd opp midlertidige filer (allerede gjort ovenfor)
+    console.log('🧹 Midlertidige filer ryddet opp');
+    
+    // Logg resultat for debugging
+    console.log('📊 MANUELL SALGSOPPGAVE-ANALYSE RESULTAT:');
+    console.log('==========================================');
+    console.log(JSON.stringify(result, null, 2));
+    console.log('==========================================');
+    
+    return res.json(result);
+    
+  } catch (error) {
+    console.error('❌ Feil i manuell salgsoppgave-analyse:', error);
+    
+    // **STEG 4**: Rydd opp midlertidig fil ved feil
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log('🗑️ Midlertidig PDF-fil slettet (etter feil)');
+      } catch (cleanupErr) {
+        console.error('⚠️ Kunne ikke slette midlertidig fil:', cleanupErr.message);
+      }
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: "Kunne ikke analysere salgsoppgave-PDF.",
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 });

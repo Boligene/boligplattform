@@ -1,5 +1,5 @@
 import { AIBoligService } from '@boligplattform/core';
-import { ArrowRight, Bot, Lightbulb } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Bot, CheckCircle, Lightbulb, Upload } from 'lucide-react';
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -16,6 +16,9 @@ export const AIBoligWidget: React.FC<AIBoligWidgetProps> = ({ className = '' }) 
     adresse?: string;
     pris?: string;
     type?: string;
+    textAnalysis?: any;
+    needsPDFUpload?: boolean;
+    userFriendlyMessage?: string;
   } | null>(null);
 
   const handleQuickAnalysis = async () => {
@@ -23,17 +26,34 @@ export const AIBoligWidget: React.FC<AIBoligWidgetProps> = ({ className = '' }) 
 
     setLoading(true);
     try {
-      const analysis = await AIBoligService.analyseBolig(finnUrl);
+      // Bruk den nye utvidede analysen som inkluderer salgsoppgave
+      const analysis = await AIBoligService.analyseMedSalgsoppgave(finnUrl);
 
       setQuickAnalysis({
         score: analysis.score,
         summary: analysis.sammendrag.substring(0, 150) + '...',
         adresse: analysis.scraping_data?.adresse,
         pris: analysis.scraping_data?.pris,
-        type: analysis.scraping_data?.type
+        type: analysis.scraping_data?.type,
+        textAnalysis: analysis.textAnalysis,
+        needsPDFUpload: analysis.needsPDFUpload,
+        userFriendlyMessage: analysis.userFriendlyMessage
       });
     } catch (error) {
       console.error('Quick analysis error:', error);
+      // Fallback til standard analyse
+      try {
+        const fallbackAnalysis = await AIBoligService.analyseBolig(finnUrl);
+        setQuickAnalysis({
+          score: fallbackAnalysis.score,
+          summary: fallbackAnalysis.sammendrag.substring(0, 150) + '...',
+          adresse: fallbackAnalysis.scraping_data?.adresse,
+          pris: fallbackAnalysis.scraping_data?.pris,
+          type: fallbackAnalysis.scraping_data?.type
+        });
+      } catch (fallbackError) {
+        console.error('Fallback analysis error:', fallbackError);
+      }
     } finally {
       setLoading(false);
     }
@@ -94,6 +114,40 @@ export const AIBoligWidget: React.FC<AIBoligWidgetProps> = ({ className = '' }) 
                   {quickAnalysis.type && <span>{quickAnalysis.type}</span>}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Tekstkvalitet og PDF-upload anbefaling */}
+          {quickAnalysis.textAnalysis && (
+            <div className={`bg-white rounded-lg p-3 border ${
+              quickAnalysis.textAnalysis.quality === 'høy' ? 'border-green-200' :
+              quickAnalysis.textAnalysis.quality === 'medium' ? 'border-yellow-200' :
+              'border-red-200'
+            }`}>
+              <div className="flex items-center gap-2 mb-2">
+                {quickAnalysis.textAnalysis.quality === 'høy' ? (
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-yellow-600" />
+                )}
+                <span className="text-sm font-medium text-gray-700">
+                  Salgsoppgave: {AIBoligService.formatTextQuality(quickAnalysis.textAnalysis)}
+                </span>
+              </div>
+              {quickAnalysis.userFriendlyMessage && (
+                <p className="text-sm text-gray-600 mb-2">
+                  {quickAnalysis.userFriendlyMessage}
+                </p>
+              )}
+              {quickAnalysis.needsPDFUpload && (
+                <Link 
+                  to="/takstrapport-analyse"
+                  className="inline-flex items-center gap-2 text-sm text-brown-600 hover:text-brown-800 font-medium"
+                >
+                  <Upload className="w-4 h-4" />
+                  Last opp PDF for bedre analyse
+                </Link>
+              )}
             </div>
           )}
 
