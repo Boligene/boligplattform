@@ -1,5 +1,5 @@
 import { AIBoligService } from '@boligplattform/core';
-import { AlertTriangle, Bot, Brain, CheckCircle, FileText, Info, Lightbulb, MessageCircle, Send, Upload, XCircle } from 'lucide-react';
+import { AlertTriangle, Bot, Brain, CheckCircle, Download, FileText, Info, MessageCircle, Send, Upload, XCircle } from 'lucide-react';
 import React, { useState } from 'react';
 import { PDFDropzone } from './PDFDropzone';
 
@@ -25,11 +25,12 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   
-  // **NYE STATE VARIABLER FOR PDF-UPLOAD**
+  // **STATE VARIABLER FOR PDF-UPLOAD - ALLTID TILGJENGELIG**
   const [showPDFUpload, setShowPDFUpload] = useState(false);
   const [pdfUploading, setPdfUploading] = useState(false);
   const [pdfUploadError, setPdfUploadError] = useState('');
   const [manualPDFAnalysis, setManualPDFAnalysis] = useState<any>(null);
+  const [dataSource, setDataSource] = useState<'scraping' | 'manual_pdf' | 'combined'>('scraping');
 
   console.log('AIBoligassistent component rendering');
 
@@ -43,22 +44,15 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
     setLoading(true);
     
     // **RYDD OPP STATE FRA FORRIGE ANALYSE**
-    setShowPDFUpload(false);
     setPdfUploadError('');
     setManualPDFAnalysis(null);
+    setDataSource('scraping');
     
     try {
       // Bruk den nye utvidede analysen som inkluderer salgsoppgave
       const analysisResult = await AIBoligService.analyseMedSalgsoppgave(urlInput);
       console.log('Utvidet analyse result:', analysisResult);
       setAnalysis(analysisResult);
-      
-      // **SJEKK OM VI TRENGER PDF-UPLOAD**
-      const needsPDFUpload = analysisResult?.salgsoppgaveAnalyse?.textAnalysis?.needsPDFUpload;
-      if (needsPDFUpload) {
-        console.log('🔄 Backend indikerer at PDF-upload trengs');
-        setShowPDFUpload(true);
-      }
       
     } catch (error) {
       console.error('Service error:', error);
@@ -68,7 +62,7 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
     }
   };
 
-  // **NY FUNKSJON FOR PDF-UPLOAD AV SALGSOPPGAVE**
+  // **FORBEDRET FUNKSJON FOR PDF-UPLOAD AV SALGSOPPGAVE**
   const handlePDFUpload = async (file: File) => {
     console.log('📄 Starter manuell PDF-upload av salgsoppgave');
     setPdfUploading(true);
@@ -76,37 +70,59 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
     
     try {
       // Bruk AIBoligService for å laste opp PDF
-      const pdfResult = await AIBoligService.analyseSalgsoppgavePDF(file, urlInput);
+      const pdfResult = await AIBoligService.analyseSalgsoppgavePDF(file, urlInput || '');
       console.log('✅ PDF-analyse fullført:', pdfResult);
       
       setManualPDFAnalysis(pdfResult);
       
-      // **KOMBINER PDF-ANALYSE MED EKSISTERENDE ANALYSE**
+      // **FORBEDRET KOMBINERINGSSTRATEGI**
       if (analysis) {
+        // Kombiner PDF-analyse med eksisterende scraping-data
         const combinedAnalysis = {
           ...analysis,
-          // Overstyr salgsoppgave-delen med PDF-resultatet
-          salgsoppgaveAnalyse: pdfResult,
-          // Marker at vi har fått bedre data
-          _pdfUploadEnhanced: true,
-          _combinedSources: {
-            scraping: analysis.scraping_data || analysis.boligData,
-            manualPDF: pdfResult
+          // Overstyr salgsoppgave-delen med PDF-resultatet (høyere prioritet)
+          salgsoppgaveAnalyse: {
+            ...pdfResult,
+            _isManualUpload: true,
+            _uploadTimestamp: new Date().toISOString(),
+            _originalFileName: file.name
+          },
+          // Behold scraping-data som sekundær kilde
+          _dataSources: {
+            primary: 'manual_pdf',
+            secondary: 'scraping',
+            scrapingData: analysis.scraping_data || analysis.boligData,
+            manualPDFData: pdfResult
           }
         };
         
-        console.log('🔄 Kombinerer PDF-analyse med eksisterende data');
+        console.log('🔄 Kombinerer PDF-analyse med eksisterende scraping-data');
         setAnalysis(combinedAnalysis);
+        setDataSource('combined');
       } else {
-        // Hvis vi ikke har eksisterende analyse, bruk bare PDF-resultatet
-        setAnalysis({
-          salgsoppgaveAnalyse: pdfResult,
-          _pdfUploadOnly: true
-        });
+        // Hvis vi ikke har eksisterende analyse, opprett ny basert kun på PDF
+        const pdfOnlyAnalysis = {
+          salgsoppgaveAnalyse: {
+            ...pdfResult,
+            _isManualUpload: true,
+            _uploadTimestamp: new Date().toISOString(),
+            _originalFileName: file.name
+          },
+          _dataSources: {
+            primary: 'manual_pdf_only',
+            manualPDFData: pdfResult
+          },
+          // Generer en grunnleggende score basert på PDF-analysen
+          score: pdfResult.analysis?.score || 75,
+          sammendrag: pdfResult.analysis?.sammendrag || 'Analyse basert på opplastet salgsoppgave-PDF'
+        };
+        
+        setAnalysis(pdfOnlyAnalysis);
+        setDataSource('manual_pdf');
       }
       
-      // **SKJUL PDF-UPLOAD SEKSJONEN ETTER VELLYKKET UPLOAD**
-      setShowPDFUpload(false);
+      // **BEHOLD PDF-UPLOAD SEKSJONEN ÅPEN MED SUKSESS-MELDING**
+      // setShowPDFUpload(false); // Fjernet - lar brukeren se resultatet
       
     } catch (error) {
       console.error('❌ PDF-upload feilet:', error);
@@ -116,9 +132,17 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
     }
   };
 
-  // **FUNKSJON FOR Å LUKKE PDF-UPLOAD SEKSJONEN**
-  const handleClosePDFUpload = () => {
-    setShowPDFUpload(false);
+  // **FUNKSJON FOR Å ÅPNE/LUKKE PDF-UPLOAD SEKSJONEN**
+  const togglePDFUpload = () => {
+    setShowPDFUpload(!showPDFUpload);
+    if (!showPDFUpload) {
+      setPdfUploadError('');
+    }
+  };
+
+  // **NY FUNKSJON FOR Å OVERSKRIVE EKSISTERENDE ANALYSE**
+  const handleOverwriteAnalysis = () => {
+    setShowPDFUpload(true);
     setPdfUploadError('');
   };
 
@@ -164,6 +188,16 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
 
   const generateChatResponse = async (question: string, analysis: any): Promise<string> => {
     try {
+      // **NYT: Pre-processing av spørsmål for å sikre presise svar på romstørrelser**
+      console.log('🤖 Behandler spørsmål:', question);
+      console.log('📊 Tilgjengelig analyse-data:', {
+        hasAnalysis: !!analysis,
+        hasSalgsoppgave: !!(analysis?.salgsoppgaveAnalyse?.success),
+        hasManualPDF: !!manualPDFAnalysis,
+        hasDetailedInfo: !!(analysis?.salgsoppgaveAnalyse?.detailedInfo),
+        hasRomInfo: !!(analysis?.salgsoppgaveAnalyse?.detailedInfo?.romInformasjon)
+      });
+
       // Bygg utvidet kontekst med all tilgjengelig data (inkludert manuell PDF)
       const enrichedAnalysis = {
         ...analysis,
@@ -175,8 +209,13 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
           textAnalysis: analysis.salgsoppgaveAnalyse?.textAnalysis || {},
           standardAnalyse: analysis.standard_analyse || {},
           salgsoppgaveAnalyse: analysis.salgsoppgaveAnalyse?.analysis || {},
-          // **INKLUDER MANUELL PDF-DATA**
-          manualPDFData: manualPDFAnalysis || null
+          // **INKLUDER MANUELL PDF-DATA MED FULL TEKST**
+          manualPDFData: manualPDFAnalysis ? {
+            ...manualPDFAnalysis,
+            // Sikre at hele PDF-teksten sendes til AI
+            fullText: manualPDFAnalysis.extractedText || manualPDFAnalysis.fullText || '',
+            extractedText: manualPDFAnalysis.extractedText || manualPDFAnalysis.fullText || ''
+          } : null
         },
         // Metadata om datakvalitet (oppdatert med PDF-info)
         dataQuality: {
@@ -195,12 +234,36 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
         }
       };
 
-      // Bruk AIBoligService med den rikede konteksten
+      // **FORBEDRET: Bruk AIBoligService med full debugging**
+      console.log('🚀 Sender spørsmål til AI med kontekst:', {
+        questionLength: question.length,
+        contextSize: JSON.stringify(enrichedAnalysis).length,
+        hasAllData: !!enrichedAnalysis.allData,
+        hasManualPDF: !!enrichedAnalysis.allData?.manualPDFData,
+        pdfTextLength: enrichedAnalysis.allData?.manualPDFData?.fullText?.length || 0
+      });
+      
       const response = await AIBoligService.chatMedAI(question, enrichedAnalysis, chatMessages);
+      
+      console.log('✅ AI-respons mottatt:', {
+        responseLength: response.content.length,
+        timestamp: response.timestamp
+      });
+      
       return response.content;
     } catch (error) {
-      console.error('Chat error:', error);
-      return 'Beklager, jeg kunne ikke svare på det akkurat nå. Prøv igjen senere.';
+      console.error('❌ Chat-feil:', error);
+      
+      // **FORBEDRET FEILMELDING MED CONTEXT**
+      if (error instanceof Error) {
+        if (error.message.includes('API')) {
+          return 'OpenAI API-feil. Sjekk API-nøkkel eller prøv igjen senere.';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          return 'Nettverksfeil. Sjekk internettforbindelsen og prøv igjen.';
+        }
+      }
+      
+      return 'Beklager, jeg kunne ikke svare på det akkurat nå. Prøv igjen eller last opp salgsoppgave-PDF for bedre analyse.';
     }
   };
 
@@ -240,103 +303,273 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
   };
 
   return (
-    <div className="bg-white/80 rounded-2xl shadow-xl p-6 max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="bg-brown-100 p-3 rounded-2xl">
-          <Bot className="w-8 h-8 text-brown-700" />
-        </div>
-        <div>
-          <h2 className="text-3xl font-seriflogo font-bold text-brown-900">AI Boligassistent</h2>
-          <p className="text-brown-600">Din personlige digitale boligrådgiver med salgsoppgave-analyse</p>
-        </div>
-      </div>
-
-      {/* URL Input Section */}
-      {!analysis && (
-        <div className="mb-8 p-6 bg-brown-50/60 rounded-2xl border border-brown-200">
-          <h3 className="text-xl font-seriflogo font-semibold mb-4 flex items-center gap-2 text-brown-800">
-            <Lightbulb className="w-6 h-6" />
-            Utvidet boliganalyse med salgsoppgave
-          </h3>
-          <div className="mb-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
-            <h4 className="font-semibold text-purple-800 mb-2">🚀 Nye funksjoner implementert:</h4>
-            <ul className="text-sm text-purple-700 space-y-1">
-              <li>• <strong>Intelligent PDF-søk:</strong> Finner salgsoppgaver i iframe, object og viewer-sider</li>
-              <li>• <strong>Tekstkvalitet-vurdering:</strong> Vurderer hvor mye informasjon som ble funnet</li>
-              <li>• <strong>PDF-upload anbefaling:</strong> Foreslår direkte opplasting hvis lite tekst funnet</li>
-              <li>• <strong>Strukturerte fakta:</strong> Ekstraherer nøkkeldata direkte fra salgsoppgave</li>
-              <li>• <strong>Forbedret chat:</strong> AI-assistenten har tilgang til all tilgjengelig data</li>
-            </ul>
+    <div className="bg-gradient-to-br from-slate-50 to-stone-100 min-h-screen">
+      <div className="max-w-6xl mx-auto px-6 py-12">
+        
+        {/* **REDESIGNET HEADER - EKSKLUSIV OG PROFESJONELL** */}
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl mb-6 shadow-2xl">
+            <Bot className="w-10 h-10 text-white" />
           </div>
-          <div className="flex gap-3">
-            <input
-              type="url"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="Lim inn Finn.no lenke her..."
-              className="flex-1 rounded-full px-5 py-3 bg-white border border-brown-200 text-lg focus:outline-none focus:ring-2 focus:ring-brown-400 placeholder:text-brown-400"
-            />
-            <button
-              onClick={handleAnalyse}
-              disabled={loading || !urlInput.trim()}
-              className="rounded-full px-6 py-3 bg-brown-500 text-white font-semibold text-lg hover:bg-brown-600 transition flex items-center gap-2 shadow disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  Analyserer...
-                </>
-              ) : (
-                <>
-                  <Brain className="w-5 h-5" />
-                  Analyser
-                </>
-              )}
-            </button>
-          </div>
+          <h1 className="text-5xl font-seriflogo font-bold text-slate-900 mb-4">
+            AI Boligassistent
+          </h1>
+          <p className="text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
+            Din digitale ekspert for avansert boliganalyse med automatisk datahenting og salgsoppgave-tolkning
+          </p>
         </div>
-      )}
 
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center py-16">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-brown-500 mx-auto mb-6"></div>
-            <h3 className="text-xl font-seriflogo font-semibold text-brown-800 mb-2">
-              Utvidet AI-analyse pågår
-            </h3>
-            <div className="space-y-2 text-brown-600">
-              <p>• Henter boligdata fra Finn.no</p>
-              <p>• Søker etter salgsoppgave og dokumenter</p>
-              <p>• Analyserer PDF-innhold med iframe/object støtte</p>
-              <p>• Vurderer tekstkvalitet og datakomplethet</p>
-              <p>• Analyserer med OpenAI GPT</p>
-              <p className="text-sm">Dette kan ta 30-90 sekunder...</p>
+        {/* **ELEGANT ANALYSE-SEKSJON** */}
+        {!analysis && (
+          <div className="bg-white/70 backdrop-blur-sm rounded-3xl shadow-xl border border-slate-200 p-8 mb-8">
+            
+            {/* **ELEGANTE INFORMASJONSKORT** */}
+            <div className="grid lg:grid-cols-2 gap-8 mb-8">
+              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-6 border border-slate-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center">
+                    <span className="text-white text-lg">🌐</span>
+                  </div>
+                  <h3 className="text-xl font-semibold text-slate-900">Automatisk Analyse</h3>
+                </div>
+                <p className="text-slate-600 leading-relaxed">
+                  Lim inn Finn.no-lenke for automatisk henting av boligdata, salgsoppgave og AI-drevet markedsanalyse
+                </p>
+              </div>
+              
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-2xl p-6 border border-amber-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-amber-700 rounded-full flex items-center justify-center">
+                    <span className="text-white text-lg">📄</span>
+                  </div>
+                  <h3 className="text-xl font-semibold text-slate-900">Direkte PDF-analyse</h3>
+                </div>
+                <p className="text-slate-600 leading-relaxed">
+                  Last opp salgsoppgave direkte for øyeblikkelig og komplett AI-tolkning av alle detaljer
+                </p>
+              </div>
+            </div>
+
+            {/* **SOFISTIKERT INPUT-SEKSJON** */}
+            <div className="space-y-6">
+              <div className="relative">
+                <input
+                  type="url"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  placeholder="Lim inn Finn.no-lenke for automatisk analyse..."
+                  className="w-full h-16 px-6 text-lg bg-white border-2 border-slate-200 rounded-2xl focus:border-slate-400 focus:outline-none transition-all placeholder:text-slate-400 shadow-sm"
+                />
+                <button
+                  onClick={handleAnalyse}
+                  disabled={loading || !urlInput.trim()}
+                  className="absolute right-2 top-2 h-12 px-8 bg-gradient-to-r from-slate-800 to-slate-900 text-white font-semibold rounded-xl hover:from-slate-700 hover:to-slate-800 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      Analyserer...
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="w-5 h-5" />
+                      Analyser
+                    </>
+                  )}
+                </button>
+              </div>
+              
+              {/* **ELEGANT ELLER-SEPARATOR** */}
+              <div className="flex items-center gap-4">
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent"></div>
+                <span className="text-slate-500 font-medium px-4">eller</span>
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent"></div>
+              </div>
+              
+              {/* **PREMIUM PDF-UPLOAD KNAPP** */}
+              <div className="text-center">
+                <button
+                  onClick={togglePDFUpload}
+                  className="inline-flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 rounded-2xl hover:from-amber-200 hover:to-amber-300 transition-all border border-amber-300 shadow-sm font-medium"
+                >
+                  <Upload className="w-5 h-5" />
+                  {showPDFUpload ? 'Skjul PDF-upload' : 'Last opp salgsoppgave direkte'}
+                </button>
+                <p className="text-sm text-slate-500 mt-2">
+                  Perfekt hvis du har mottatt salgsoppgaven på e-post eller ønsker øyeblikkelig analyse
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* **PREMIUM PDF-UPLOAD SEKSJON** */}
+        {(showPDFUpload || (analysis && !manualPDFAnalysis)) && (
+          <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-slate-200 p-8 mb-8">
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-amber-700 to-amber-800 rounded-2xl mb-4">
+                <FileText className="w-8 h-8 text-white" />
+              </div>
+              <h3 className="text-2xl font-seriflogo font-bold text-slate-900 mb-2">
+                {analysis 
+                  ? manualPDFAnalysis 
+                    ? 'Last opp ny salgsoppgave for oppdatert analyse' 
+                    : 'Har du en oppdatert salgsoppgave? Last opp for komplett analyse'
+                  : 'Last opp salgsoppgave for direkte analyse'
+                }
+              </h3>
+              <p className="text-slate-600 max-w-2xl mx-auto">
+                {analysis 
+                  ? 'Upload en ny PDF for å overskrive og forbedre den eksisterende analysen med de nyeste dataene'
+                  : 'Dra og slipp PDF-filen her, eller klikk for å velge fil. Støtter filer opptil 50MB'
+                }
+              </p>
+            </div>
+            
+            <div className="max-w-2xl mx-auto">
+              <PDFDropzone onFileSelect={handlePDFUpload} />
+            </div>
+            
+            {pdfUploading && (
+              <div className="mt-6 flex items-center justify-center gap-3 text-slate-600">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-600"></div>
+                <span className="font-medium">Analyserer PDF med AI...</span>
+              </div>
+            )}
+
+            {pdfUploadError && (
+              <div className="mt-6 bg-red-50 border border-red-200 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                  <h4 className="font-semibold text-red-800">Feil ved PDF-upload</h4>
+                </div>
+                <p className="text-red-700 text-sm">{pdfUploadError}</p>
+              </div>
+            )}
+
+            {manualPDFAnalysis && !pdfUploading && (
+              <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle className="w-5 h-5 text-emerald-600" />
+                  <h4 className="font-semibold text-emerald-800">PDF analysert!</h4>
+                </div>
+                <p className="text-emerald-700 text-sm">
+                  Salgsoppgaven er analysert og integrert i analysen nedenfor.
+                  {manualPDFAnalysis._originalFileName && ` (${manualPDFAnalysis._originalFileName})`}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+              {/* **PREMIUM LOADING STATE** */}
+        {loading && (
+          <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-slate-200 p-12 mb-8">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-20 w-20 border-b-4 border-slate-800 mx-auto mb-8"></div>
+              <h3 className="text-3xl font-seriflogo font-bold text-slate-900 mb-4">
+                Avansert AI-analyse pågår
+              </h3>
+              <div className="max-w-lg mx-auto space-y-3 text-slate-600">
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></div>
+                  <span>Henter boligdata fra Finn.no</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse delay-100"></div>
+                  <span>Søker etter salgsoppgave og dokumenter</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse delay-200"></div>
+                  <span>Analyserer PDF-innhold med AI</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-2 h-2 bg-slate-400 rounded-full animate-pulse delay-300"></div>
+                  <span>Genererer profesjonell markedsanalyse</span>
+                </div>
+                <p className="text-sm text-slate-500 mt-6">
+                  Analyse tar vanligvis 30-90 sekunder avhengig av dokumentkompleksitet
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Analysis Results */}
-      {analysis && (
-        <div className="space-y-8">
-          {/* Score Overview med tekstkvalitet */}
+        {analysis && (
+          <div className="space-y-8">
+          {/* Score Overview med datakilde-indikatorer */}
           <div className="bg-gradient-to-r from-brown-50 to-brown-100 rounded-2xl p-6 border border-brown-200">
             <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-2xl font-seriflogo font-bold text-brown-900">
-                  {analysis.salgsoppgaveAnalyse ? 'Utvidet AI-analyse fullført' : 'AI-analyse fullført'}
-                </h3>
-                <p className="text-brown-600 mt-1">{analysis.finn_url || analysis.url}</p>
-              </div>
+                <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <h3 className="text-2xl font-seriflogo font-bold text-brown-900">
+                    AI-analyse fullført
+                  </h3>
+                  {/* **DATAKILDE-INDIKATOR** */}
+                  {dataSource === 'manual_pdf' && (
+                    <div className="flex items-center gap-1 px-2 py-1 bg-orange-100 rounded-full">
+                      <Download className="w-4 h-4 text-orange-600" />
+                      <span className="text-xs text-orange-700 font-medium">PDF-basert</span>
+                    </div>
+                  )}
+                  {dataSource === 'combined' && (
+                                          <div className="flex items-center gap-1 px-2 py-1 bg-amber-100 rounded-full">
+                        <FileText className="w-4 h-4 text-amber-600" />
+                        <span className="text-xs text-amber-800 font-medium">Kombinert analyse</span>
+                    </div>
+                  )}
+                  {dataSource === 'scraping' && (
+                    <div className="flex items-center gap-1 px-2 py-1 bg-slate-100 rounded-full">
+                      <Bot className="w-4 h-4 text-slate-600" />
+                      <span className="text-xs text-slate-700 font-medium">Automatisk</span>
+                  </div>
+                  )}
+                </div>
+                <p className="text-brown-600">{analysis.finn_url || analysis.url || 'Analyse basert på opplastet PDF'}</p>
+                
+                {/* **ANALYSE DATAKILDE-INFORMASJON** */}
+                <div className="mt-2 text-sm text-brown-600">
+                  {dataSource === 'manual_pdf' && (
+                    <span>Basert på: Opplastet salgsoppgave-PDF</span>
+                  )}
+                  {dataSource === 'combined' && (
+                    <span>Basert på: Opplastet PDF + automatisk data fra Finn.no</span>
+                  )}
+                  {dataSource === 'scraping' && analysis.salgsoppgaveAnalyse?.success && (
+                    <span>Basert på: Automatisk hentet data og salgsoppgave</span>
+                  )}
+                  {dataSource === 'scraping' && !analysis.salgsoppgaveAnalyse?.success && (
+                    <span>Basert på: Automatisk hentet data (uten salgsoppgave)</span>
+                  )}
+                  </div>
+                </div>
               <div className="flex items-center gap-3">
-                {getScoreIcon(analysis.score || (analysis.standard_analyse && analysis.standard_analyse.score) || 75)}
+                    {getScoreIcon(analysis.score || (analysis.standard_analyse && analysis.standard_analyse.score) || 75)}
                 <span className={`text-4xl font-seriflogo font-bold ${getScoreColor(analysis.score || (analysis.standard_analyse && analysis.standard_analyse.score) || 75)}`}>
                   {analysis.score || (analysis.standard_analyse && analysis.standard_analyse.score) || 75}/100
-                </span>
+                    </span>
+                </div>
               </div>
-            </div>
+
+            {/* **ALLTID SYNLIG PDF-UPLOAD MULIGHET I ANALYSE-VISNING** */}
+            <div className="flex items-center justify-between mb-4 p-3 bg-white/60 rounded-lg border border-brown-200">
+              <div className="flex items-center gap-2 text-sm text-brown-700">
+                <Upload className="w-4 h-4" />
+                <span>
+                  {manualPDFAnalysis 
+                    ? 'Analysen er oppdatert med opplastet PDF' 
+                    : 'Ønsker du å laste opp salgsoppgave-PDF for enda bedre analyse?'
+                  }
+                </span>
+                    </div>
+                    <button
+                onClick={togglePDFUpload}
+                className="px-3 py-1 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 transition"
+                    >
+                {showPDFUpload ? 'Skjul' : 'Last opp PDF'}
+                    </button>
+                  </div>
 
             {/* Status indicators */}
             <div className="flex flex-wrap gap-3">
@@ -351,14 +584,14 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                 <div className="flex items-center gap-2 px-3 py-1 bg-orange-100 rounded-full">
                   <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
                   <span className="text-sm text-orange-700 font-medium">Demo-analyse (OpenAI ikke tilgjengelig)</span>
-                </div>
+            </div>
               )}
               
               {/* Salgsoppgave status */}
               {analysis.salgsoppgaveAnalyse && analysis.salgsoppgaveAnalyse.success && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-purple-100 rounded-full">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-purple-700 font-medium">
+                <div className="flex items-center gap-2 px-3 py-1 bg-amber-100 rounded-full">
+                  <div className="w-2 h-2 bg-amber-600 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-amber-800 font-medium">
                     Salgsoppgave funnet ({analysis.salgsoppgaveAnalyse.source?.split(':')[0] || 'PDF'})
                   </span>
                 </div>
@@ -367,24 +600,24 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                 <div className="flex items-center gap-2 px-3 py-1 bg-orange-100 rounded-full">
                   <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
                   <span className="text-sm text-orange-700 font-medium">Salgsoppgave ikke tilgjengelig</span>
-                </div>
+              </div>
               )}
               
               {/* Scraping status */}
               {analysis.scraping_data && analysis.scraping_data.adresse !== "Testveien 123, 0123 Oslo" && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-blue-700 font-medium">Ekte data fra Finn.no</span>
+                <div className="flex items-center gap-2 px-3 py-1 bg-slate-100 rounded-full">
+                  <div className="w-2 h-2 bg-slate-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-slate-700 font-medium">Ekte data fra Finn.no</span>
                 </div>
               )}
               {analysis.scraping_data && analysis.scraping_data.adresse === "Testveien 123, 0123 Oslo" && (
                 <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
                   <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
                   <span className="text-sm text-gray-700 font-medium">Demo-data (Finn.no scraper ikke tilgjengelig)</span>
-                </div>
+              </div>
               )}
             </div>
-          </div>
+            </div>
 
           {/* Tekstkvalitet og PDF-upload anbefaling */}
           {analysis.salgsoppgaveAnalyse?.textAnalysis && (
@@ -401,7 +634,7 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                       ) : (
                         <FileText className="w-8 h-8 text-green-600" />
                       )}
-                    </div>
+                </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h4 className="text-lg font-seriflogo font-semibold">
@@ -410,174 +643,96 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                         <span className="text-sm px-2 py-1 bg-white/50 rounded-full">
                           {qualityInfo.textLength} tegn
                         </span>
-                      </div>
-                      
+            </div>
+
                       {qualityInfo.userFriendlyMessage && (
                         <p className="mb-3 text-sm leading-relaxed">
                           {qualityInfo.userFriendlyMessage}
                         </p>
                       )}
-                      
-                      {qualityInfo.needsPDFUpload && !showPDFUpload && (
-                        <div className="bg-white/50 rounded-lg p-3 border border-orange-200">
-                          <p className="text-sm font-medium mb-2">💡 Anbefaling:</p>
-                          <p className="text-sm mb-3">
-                            Vi fant ikke nok informasjon i salgsoppgaven automatisk. 
-                            For en komplett analyse, last opp PDF direkte her.
-                          </p>
-                          <button
-                            onClick={() => setShowPDFUpload(true)}
-                            className="w-full px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition flex items-center justify-center gap-2"
-                          >
-                            <Upload className="w-4 h-4" />
-                            Last opp salgsoppgave-PDF
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+            </div>
                 </div>
+              </div>
               );
             })()
           )}
 
-          {/* **PDF-UPLOAD SEKSJON** */}
-          {showPDFUpload && (
-            <div className="bg-gradient-to-r from-orange-50 to-orange-100 rounded-2xl p-6 border border-orange-200">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="bg-orange-200 p-3 rounded-2xl">
-                    <Upload className="w-8 h-8 text-orange-700" />
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-seriflogo font-bold text-orange-900">Last opp salgsoppgave-PDF</h3>
-                    <p className="text-orange-600">Få en komplett analyse ved å laste opp PDF-en direkte</p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleClosePDFUpload}
-                  className="text-orange-600 hover:text-orange-800 transition"
-                >
-                  <XCircle className="w-6 h-6" />
-                </button>
-              </div>
-
-              <PDFDropzone
-                onFileSelect={handlePDFUpload}
-                title="Dra salgsoppgave-PDF hit"
-                description="Eller klikk for å velge PDF-fil fra datamaskinen din"
-                maxSize={50}
-                isLoading={pdfUploading}
-                error={pdfUploadError}
-                className="mb-4"
-              />
-
-              {pdfUploading && (
-                <div className="text-center py-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto mb-3"></div>
-                  <p className="text-orange-700 font-medium">Analyserer PDF...</p>
-                  <p className="text-sm text-orange-600">Dette kan ta 15-30 sekunder</p>
-                </div>
-              )}
-
-              {pdfUploadError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <AlertTriangle className="w-5 h-5 text-red-600" />
-                    <h4 className="font-semibold text-red-800">Feil ved PDF-upload</h4>
-                  </div>
-                  <p className="text-red-700 text-sm">{pdfUploadError}</p>
-                </div>
-              )}
-
-              <div className="bg-white/50 rounded-lg p-4 border border-orange-200">
-                <h4 className="font-semibold text-orange-800 mb-2">📋 Instruksjoner:</h4>
-                <ul className="text-sm text-orange-700 space-y-1">
-                  <li>• Last opp salgsoppgave-PDF fra Finn.no eller megler</li>
-                  <li>• Kun PDF-filer støttes (maks 50MB)</li>
-                  <li>• AI-en vil analysere all tekst og strukturerte data</li>
-                  <li>• Resultatet kombineres med eksisterende boligdata</li>
-                </ul>
-              </div>
-            </div>
-          )}
-
           {/* Salgsoppgave-fakta (strukturerte data) */}
           {analysis.salgsoppgaveAnalyse?.salgsoppgaveFakta && Object.keys(analysis.salgsoppgaveAnalyse.salgsoppgaveFakta).length > 0 && (
-            <div className="bg-gradient-to-r from-indigo-50 to-indigo-100 rounded-2xl p-6 border border-indigo-200">
+            <div className="bg-gradient-to-br from-slate-50 to-stone-100 rounded-3xl p-6 border border-stone-200 shadow-xl">
               <div className="flex items-center gap-3 mb-6">
-                <div className="bg-indigo-200 p-3 rounded-2xl">
-                  <Info className="w-8 h-8 text-indigo-700" />
+                <div className="bg-gradient-to-br from-amber-700 to-amber-800 p-3 rounded-2xl shadow-lg">
+                  <Info className="w-8 h-8 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-seriflogo font-bold text-indigo-900">Strukturerte fakta fra salgsoppgave</h3>
-                  <p className="text-indigo-600">Nøkkeldata ekstrahert direkte fra salgsoppgave (prioriteres over scraping)</p>
-                </div>
+                  <h3 className="text-2xl font-seriflogo font-bold text-slate-900">Strukturerte fakta fra salgsoppgave</h3>
+                  <p className="text-slate-700">Nøkkeldata ekstrahert direkte fra salgsoppgave (prioriteres over scraping)</p>
               </div>
+            </div>
 
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {Object.entries(analysis.salgsoppgaveAnalyse.salgsoppgaveFakta).map(([key, value]) => (
-                  <div key={key} className="bg-white rounded-xl p-4 border border-indigo-200">
-                    <div className="text-sm text-indigo-600 font-medium mb-1 capitalize">
+                  <div key={key} className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="text-sm text-slate-600 font-medium mb-1 capitalize">
                       {key.replace(/([A-Z])/g, ' $1').toLowerCase()}
-                    </div>
-                    <div className="text-indigo-900 font-semibold">
+                </div>
+                    <div className="text-slate-900 font-semibold">
                       {String(value)}
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
+                ))}
+                </div>
+              </div>
           )}
 
           {/* Salgsoppgave-analyse seksjon */}
           {analysis.salgsoppgaveAnalyse && analysis.salgsoppgaveAnalyse.success && analysis.salgsoppgaveAnalyse.analysis && (
-            <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-2xl p-6 border border-purple-200">
+            <div className="bg-gradient-to-br from-slate-50 to-stone-100 rounded-3xl p-6 border border-stone-200 shadow-xl">
               <div className="flex items-center gap-3 mb-6">
-                <div className="bg-purple-200 p-3 rounded-2xl">
-                  <Brain className="w-8 h-8 text-purple-700" />
+                <div className="bg-gradient-to-br from-amber-700 to-amber-800 p-3 rounded-2xl shadow-lg">
+                  <Brain className="w-8 h-8 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-2xl font-seriflogo font-bold text-purple-900">Salgsoppgave-analyse</h3>
-                  <p className="text-purple-600">Dyp analyse basert på full salgsoppgave</p>
-                </div>
+                  <h3 className="text-2xl font-seriflogo font-bold text-slate-900">Salgsoppgave-analyse</h3>
+                  <p className="text-slate-700">Dyp analyse basert på full salgsoppgave</p>
               </div>
+            </div>
 
               {/* Hvis vi har strukturert analyse */}
               {analysis.salgsoppgaveAnalyse.analysis && typeof analysis.salgsoppgaveAnalyse.analysis === 'object' && analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand && (
                 <div className="grid md:grid-cols-2 gap-6">
                   {/* Teknisk tilstand */}
-                  <div className="bg-white rounded-xl p-5 border border-purple-200">
-                    <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">Teknisk tilstand</h4>
+                  <div className="bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                    <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">Teknisk tilstand</h4>
                     <div className="flex items-center gap-2 mb-3">
-                      <span className="text-2xl font-bold text-purple-700">
+                      <span className="text-2xl font-bold text-amber-700">
                         {analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.score}/10
                       </span>
-                      <span className="text-purple-600">Score</span>
-                    </div>
-                    <p className="text-purple-700 mb-3">{analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.sammendrag}</p>
+                      <span className="text-slate-600">Score</span>
+                </div>
+                    <p className="text-slate-700 mb-3">{analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.sammendrag}</p>
                     {analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.hovedFunn && (
                       <ul className="space-y-1">
                         {analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.hovedFunn.map((funn: string, index: number) => (
-                          <li key={index} className="text-sm text-purple-600 flex items-start gap-2">
-                            <span className="text-purple-400 mt-1">•</span>
+                          <li key={index} className="text-sm text-slate-600 flex items-start gap-2">
+                            <span className="text-amber-600 mt-1">•</span>
                             <span>{funn}</span>
                           </li>
                         ))}
                       </ul>
                     )}
-                  </div>
+            </div>
 
                   {/* Risiko */}
-                  <div className="bg-white rounded-xl p-5 border border-purple-200">
-                    <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">Risikoanalyse</h4>
+                  <div className="bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                    <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">Risikoanalyse</h4>
                     <div className="flex items-center gap-2 mb-3">
-                      <span className="text-2xl font-bold text-purple-700">
+                      <span className="text-2xl font-bold text-amber-700">
                         {analysis.salgsoppgaveAnalyse.analysis.risiko.score}/10
                       </span>
-                      <span className="text-purple-600">Risiko</span>
-                    </div>
-                    <p className="text-purple-700 mb-3">{analysis.salgsoppgaveAnalyse.analysis.risiko.sammendrag}</p>
+                      <span className="text-slate-600">Risiko</span>
+                </div>
+                    <p className="text-slate-700 mb-3">{analysis.salgsoppgaveAnalyse.analysis.risiko.sammendrag}</p>
                     {analysis.salgsoppgaveAnalyse.analysis.risiko.risikoer && (
                       <ul className="space-y-1">
                         {analysis.salgsoppgaveAnalyse.analysis.risiko.risikoer.map((risiko: string, index: number) => (
@@ -588,32 +743,32 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                         ))}
                       </ul>
                     )}
-                  </div>
+            </div>
 
                   {/* Prisvurdering */}
-                  <div className="bg-white rounded-xl p-5 border border-purple-200">
-                    <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">Prisvurdering</h4>
+                  <div className="bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                    <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">Prisvurdering</h4>
                     <div className="flex items-center gap-2 mb-3">
-                      <span className="text-2xl font-bold text-purple-700">
+                      <span className="text-2xl font-bold text-amber-700">
                         {analysis.salgsoppgaveAnalyse.analysis.prisvurdering.score}/10
                       </span>
-                      <span className="text-purple-600">Verdi</span>
-                    </div>
-                    <p className="text-purple-700 mb-3">{analysis.salgsoppgaveAnalyse.analysis.prisvurdering.sammendrag}</p>
-                    <p className="text-sm text-purple-600">{analysis.salgsoppgaveAnalyse.analysis.prisvurdering.markedsvurdering}</p>
-                  </div>
+                      <span className="text-slate-600">Verdi</span>
+                </div>
+                    <p className="text-slate-700 mb-3">{analysis.salgsoppgaveAnalyse.analysis.prisvurdering.sammendrag}</p>
+                    <p className="text-sm text-slate-600">{analysis.salgsoppgaveAnalyse.analysis.prisvurdering.markedsvurdering}</p>
+            </div>
 
                   {/* Oppussingsbehov */}
-                  <div className="bg-white rounded-xl p-5 border border-purple-200">
-                    <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">Oppussingsbehov</h4>
+                  <div className="bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                    <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">Oppussingsbehov</h4>
                     {analysis.salgsoppgaveAnalyse.analysis.oppussingBehov.estimertKostnad && (
-                      <p className="text-lg font-semibold text-purple-700 mb-3">
+                      <p className="text-lg font-semibold text-amber-700 mb-3">
                         {analysis.salgsoppgaveAnalyse.analysis.oppussingBehov.estimertKostnad}
                       </p>
                     )}
                     {analysis.salgsoppgaveAnalyse.analysis.oppussingBehov.nodvendig && (
                       <div className="mb-3">
-                        <h5 className="font-semibold text-purple-700 mb-1">Nødvendig:</h5>
+                        <h5 className="font-semibold text-slate-700 mb-1">Nødvendig:</h5>
                         <ul className="space-y-1">
                           {analysis.salgsoppgaveAnalyse.analysis.oppussingBehov.nodvendig.map((tiltak: string, index: number) => (
                             <li key={index} className="text-sm text-red-600 flex items-start gap-2">
@@ -622,33 +777,33 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                             </li>
                           ))}
                         </ul>
-                      </div>
+            </div>
                     )}
                     {analysis.salgsoppgaveAnalyse.analysis.oppussingBehov.onsket && (
                       <div>
-                        <h5 className="font-semibold text-purple-700 mb-1">Ønskelig:</h5>
+                        <h5 className="font-semibold text-slate-700 mb-1">Ønskelig:</h5>
                         <ul className="space-y-1">
                           {analysis.salgsoppgaveAnalyse.analysis.oppussingBehov.onsket.map((tiltak: string, index: number) => (
-                            <li key={index} className="text-sm text-purple-600 flex items-start gap-2">
-                              <span className="text-purple-400 mt-1">○</span>
+                            <li key={index} className="text-sm text-slate-600 flex items-start gap-2">
+                              <span className="text-amber-600 mt-1">○</span>
                               <span>{tiltak}</span>
                             </li>
                           ))}
                         </ul>
-                      </div>
-                    )}
-                  </div>
                 </div>
+                    )}
+              </div>
+            </div>
               )}
 
               {/* Anbefalte spørsmål */}
               {analysis.salgsoppgaveAnalyse.analysis && analysis.salgsoppgaveAnalyse.analysis.anbefalteSporsmal && (
-                <div className="mt-6 bg-white rounded-xl p-5 border border-purple-200">
-                  <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">Anbefalte spørsmål til visning</h4>
+                <div className="mt-6 bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                  <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">Anbefalte spørsmål til visning</h4>
                   <ul className="space-y-2">
                     {analysis.salgsoppgaveAnalyse.analysis.anbefalteSporsmal.map((sporsmal: string, index: number) => (
-                      <li key={index} className="text-purple-700 flex items-start gap-2">
-                        <span className="text-purple-400 mt-1">?</span>
+                      <li key={index} className="text-slate-700 flex items-start gap-2">
+                        <span className="text-amber-600 mt-1">?</span>
                         <span>{sporsmal}</span>
                       </li>
                     ))}
@@ -658,20 +813,20 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
 
               {/* Konklusjon */}
               {analysis.salgsoppgaveAnalyse.analysis && analysis.salgsoppgaveAnalyse.analysis.konklusjon && (
-                <div className="mt-6 bg-white rounded-xl p-5 border border-purple-200">
-                  <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">Konklusjon</h4>
-                  <p className="text-purple-700 leading-relaxed">{analysis.salgsoppgaveAnalyse.analysis.konklusjon}</p>
+                <div className="mt-6 bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                  <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">Konklusjon</h4>
+                  <p className="text-slate-700 leading-relaxed">{analysis.salgsoppgaveAnalyse.analysis.konklusjon}</p>
                 </div>
               )}
 
               {/* Fallback for rå analyse */}
               {analysis.salgsoppgaveAnalyse.analysis && analysis.salgsoppgaveAnalyse.analysis.raaAnalyse && (
-                <div className="mt-6 bg-white rounded-xl p-5 border border-purple-200">
-                  <h4 className="font-seriflogo font-semibold text-purple-800 text-lg mb-3">AI-analyse av salgsoppgave</h4>
-                  <p className="text-purple-700 leading-relaxed whitespace-pre-wrap">{analysis.salgsoppgaveAnalyse.analysis.raaAnalyse}</p>
+                <div className="mt-6 bg-white/80 backdrop-blur-sm rounded-xl p-5 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                  <h4 className="font-seriflogo font-semibold text-slate-800 text-lg mb-3">AI-analyse av salgsoppgave</h4>
+                  <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">{analysis.salgsoppgaveAnalyse.analysis.raaAnalyse}</p>
                 </div>
               )}
-            </div>
+              </div>
           )}
 
           {/* The Good, The Bad, The Ugly - støtter både old og new format */}
@@ -691,7 +846,7 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                     </li>
                   ))}
                 </ul>
-              </div>
+            </div>
 
               {/* The Bad */}
               <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-5">
@@ -707,7 +862,7 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                     </li>
                   ))}
                 </ul>
-              </div>
+            </div>
 
               {/* The Ugly */}
               <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
@@ -754,22 +909,22 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                           <span className="text-xs text-green-700 font-medium">Ekte OpenAI chat aktivert</span>
-                        </div>
+                </div>
                       )}
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                         <span className="text-xs text-blue-700 font-medium">Har tilgang til all analyse-data</span>
-                      </div>
-                    </div>
-                  </div>
+              </div>
+            </div>
                 </div>
+              </div>
                 <button
                   onClick={() => setShowChat(!showChat)}
                   className="px-4 py-2 bg-brown-100 text-brown-800 rounded-full hover:bg-brown-200 transition"
                 >
                   {showChat ? 'Skjul chat' : 'Åpne chat'}
                 </button>
-              </div>
+            </div>
             </div>
 
             {showChat && (
@@ -786,8 +941,8 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                         {analysis.salgsoppgaveAnalyse?.salgsoppgaveFakta && <p>• Strukturerte fakta fra salgsoppgave</p>}
                         {analysis.salgsoppgaveAnalyse?.detailedInfo && <p>• Detaljert teknisk informasjon</p>}
                         <p>• Standard AI-analyse og sammendrag</p>
-                      </div>
-                    </div>
+                </div>
+              </div>
                   )}
                   
                   {chatMessages.map((message) => (
@@ -803,8 +958,8 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                         }`}
                       >
                         <p className="leading-relaxed whitespace-pre-wrap">{message.content}</p>
-                      </div>
-                    </div>
+                </div>
+              </div>
                   ))}
                   
                   {chatLoading && (
@@ -813,11 +968,11 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                         <div className="flex items-center gap-2">
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-brown-500"></div>
                           <span>AI analyserer all tilgjengelig data...</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
+              </div>
+            </div>
+                  )}
+            </div>
 
                 {/* Chat Input */}
                 <form onSubmit={handleChatSubmit} className="flex gap-3">
@@ -837,9 +992,9 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
                     <Send className="w-4 h-4" />
                   </button>
                 </form>
-              </div>
+                </div>
             )}
-          </div>
+            </div>
 
           {/* New Analysis Button */}
           <div className="text-center pt-4">
@@ -854,21 +1009,22 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
             >
               Analyser ny bolig
             </button>
-          </div>
-        </div>
+                </div>
+              </div>
       )}
 
       {/* Status info */}
       {!analysis && !loading && (
-        <div className="text-center text-brown-600 py-6">
+        <div className="text-center text-slate-600 py-6">
           <p className="font-seriflogo text-lg">Klar for utvidet AI-analyse!</p>
-          <div className="text-sm text-brown-500 mt-2 space-y-1">
+          <div className="text-sm text-slate-500 mt-2 space-y-1">
             <p>OpenAI: {AIBoligService.hasApiKey() ? '✅ Tilkoblet' : '❌ Ikke konfigurert (bruker mock data)'}</p>
             <p>Salgsoppgave-søk: ✅ Aktivert</p>
             <p>PDF-ekstraksjonslogikk: ✅ Implementert</p>
-          </div>
-        </div>
+                </div>
+              </div>
       )}
-    </div>
+        </div>
+      </div>
   );
 }; 

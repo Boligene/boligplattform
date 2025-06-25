@@ -695,9 +695,12 @@ AI ANALYSE:
 - Alvorlige problemer: ${(standardAnalyse?.the_ugly || boligAnalyse.the_ugly || []).join(', ') || 'Ingen'}
 - Sammendrag: ${standardAnalyse?.sammendrag || boligAnalyse.sammendrag}`;
 
-        // Legg til salgsoppgave-analyse hvis tilgjengelig
-        if (boligAnalyse.salgsoppgaveAnalyse && boligAnalyse.salgsoppgaveAnalyse.success) {
-          const salgsAnalyse = boligAnalyse.salgsoppgaveAnalyse;
+        // **FIX: Sjekk både salgsoppgaveAnalyse og manualPDFData**
+        const salgsoppgaveData = boligAnalyse.salgsoppgaveAnalyse || 
+                                (boligAnalyse.allData && boligAnalyse.allData.manualPDFData);
+                                
+        if (salgsoppgaveData && (salgsoppgaveData.success || salgsoppgaveData.analysis)) {
+          const salgsAnalyse = salgsoppgaveData;
           
           systemPrompt += `
 
@@ -725,34 +728,80 @@ DETALJERT SALGSOPPGAVE-ANALYSE:
             }
           }
           
-          // Inkluder detaljert informasjon fra salgsoppgave hvis tilgjengelig
+          // **FORBEDRET: Inkluder HELE detaljerte informasjonen fra salgsoppgave**
           if (salgsAnalyse.detailedInfo) {
             systemPrompt += `
 
 DETALJERT INFORMASJON FRA SALGSOPPGAVE:`;
             
+            // **NYT: Spesiell håndtering av rom-informasjon**
+            if (salgsAnalyse.detailedInfo.romInformasjon) {
+              systemPrompt += `
+
+ROM-OVERSIKT MED STØRRELSER:`;
+              Object.entries(salgsAnalyse.detailedInfo.romInformasjon).forEach(([, romData]) => {
+                if (romData && typeof romData === 'object' && 'originalNavn' in romData && 'størrelse' in romData && 'enhet' in romData) {
+                  systemPrompt += `
+- ${(romData as any).originalNavn}: ${(romData as any).størrelse} ${(romData as any).enhet}`;
+                }
+              });
+            }
+            
+            // Inkluder all annen detaljert informasjon UTEN begrensning
             Object.entries(salgsAnalyse.detailedInfo).forEach(([key, value]) => {
-              if (value && typeof value === 'string' && value.trim()) {
+              if (key !== 'romInformasjon' && value && typeof value === 'string' && value.trim()) {
                 systemPrompt += `
-${key.toUpperCase()}: ${value.substring(0, 300)}`;
+
+${key.toUpperCase()}: ${value}`;
               }
             });
           }
           
-          // Inkluder rå analyse tekst hvis tilgjengelig (begrenset for å spare tokens)
-          if (salgsAnalyse.analysis && salgsAnalyse.analysis.raaAnalyse) {
-            const shortRawText = salgsAnalyse.analysis.raaAnalyse.substring(0, 1000);
+          // **FORBEDRET: Håndter HELE PDF-innholdet fra manuell upload uten begrensning**
+          if (salgsAnalyse.fullText || salgsAnalyse.extractedText) {
+            const fullContent = salgsAnalyse.fullText || salgsAnalyse.extractedText;
             systemPrompt += `
 
-UTDRAG FRA SALGSOPPGAVE:
-${shortRawText}${salgsAnalyse.analysis.raaAnalyse.length > 1000 ? '...' : ''}`;
+KOMPLETT INNHOLD FRA OPPLASTET SALGSOPPGAVE:
+${fullContent}`;
+          }
+          
+          // Inkluder HELE rå analyse tekst hvis tilgjengelig
+          if (salgsAnalyse.analysis && salgsAnalyse.analysis.raaAnalyse) {
+            systemPrompt += `
+
+KOMPLETT INNHOLD FRA SALGSOPPGAVE:
+${salgsAnalyse.analysis.raaAnalyse}`;
           }
         }
         
+        // **DEBUG: Legg til informasjon om tilgjengelige data**
+        const availableData = [];
+        if (boligAnalyse.scraping_data) availableData.push('grunnleggende boligdata');
+        if (boligAnalyse.salgsoppgaveAnalyse?.success) availableData.push('automatisk salgsoppgave');
+        if (boligAnalyse.allData?.manualPDFData) availableData.push('manuell PDF-upload');
+        
         systemPrompt += `
 
-VIKTIG: Du har tilgang til all denne informasjonen. Når brukeren spør om spesifikke detaljer som parkering, oppvarming, teknisk tilstand, etc., skal du svare basert på informasjonen ovenfor. Hvis informasjonen ikke er tilgjengelig i konteksten, si det tydelig.`;
+TILGJENGELIGE DATAKILDER: ${availableData.join(', ')}
+
+VIKTIG: Du har tilgang til KOMPLETT informasjon fra salgsoppgaven ovenfor - INGEN begrensninger eller utdrag. Når brukeren spør om:
+- Romstørrelser (soverom, bad, stue, etc.) - bruk ROM-OVERSIKT MED STØRRELSER
+- Tekniske detaljer - bruk KOMPLETT INNHOLD FRA SALGSOPPGAVE
+- Spesifikke rom-beskrivelser - søk i hele PDF-innholdet
+- Felleskostnader, oppvarming, parkering - alt er tilgjengelig i full kontekst
+
+GI ALLTID EKSAKTE SVAR basert på informasjonen. Hvis brukeren spør "hvor stort er soverommet?" og det står "Soverom (11,2 m²)" i dokumentet, svar "Soverommet er 11,2 m²" - ikke "informasjonen er ikke tilgjengelig".`;
       }
+      
+      // **DEBUG LOG for å spore hva som sendes til AI**
+      console.log('🤖 Chat kontekst oppsummering:', {
+        hasBoligAnalyse: !!boligAnalyse,
+        hasSalgsoppgave: !!(boligAnalyse?.salgsoppgaveAnalyse?.success),
+        hasManualPDF: !!(boligAnalyse?.allData?.manualPDFData),
+        systemPromptLength: systemPrompt.length,
+        userMessage: userMessage
+      });
 
       // Bygg meldingshistorikk for OpenAI
       const messages = [
@@ -774,7 +823,7 @@ VIKTIG: Du har tilgang til all denne informasjonen. Når brukeren spør om spesi
         body: JSON.stringify({
           model: 'gpt-3.5-turbo',
           messages: messages,
-          max_tokens: 300,
+          max_tokens: 1000, // Økt fra 300 til 1000 for å håndtere mer detaljerte svar
           temperature: 0.7,
         }),
       });

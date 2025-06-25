@@ -1327,85 +1327,229 @@ function combineDataWithSalgsoppgavePriority(scrapingData, salgsoppgaveFakta) {
   return combinedData;
 }
 
-// Funksjon for å ekstrahere detaljert info fra salgsoppgave-tekst for chat-bot
+// **FORBEDRET FUNKSJON** for å ekstrahere detaljert info fra salgsoppgave-tekst for chat-bot
 function extractDetailedInfo(salgsoppgaveText) {
-  console.log('📋 Ekstraherer detaljert info for chat-bot');
+  console.log('📋 Ekstraherer detaljert info for chat-bot (FORBEDRET MED ROMSTØRRELSER)');
   
   const info = {};
   const text = salgsoppgaveText.toLowerCase();
   
-  // Parkering
-  const parkeringMatch = salgsoppgaveText.match(/parkering[^.]*?([^.]*)/i);
-  if (parkeringMatch) {
-    info.parkering = parkeringMatch[0].substring(0, 200);
-  } else if (text.includes('parkering')) {
-    // Se etter mer kontekst rundt parkering
-    const parkeringIndex = text.indexOf('parkering');
-    const context = salgsoppgaveText.substring(Math.max(0, parkeringIndex - 100), parkeringIndex + 300);
-    info.parkering = context;
+  // **NYT: EKSTRAHERING AV SPESIFIKKE ROM MED STØRRELSER**
+  info.romInformasjon = extractRoomDetails(salgsoppgaveText);
+  
+  // **UTVIDET: Beskrivelse av innvendige rom**
+  const innvendigSeksjon = extractSectionContent(salgsoppgaveText, ['beskrivelse - innvendig', 'innvendig', 'beskrivelse innvendig', 'romfordeling']);
+  if (innvendigSeksjon) {
+    info.innvendigBeskrivelse = innvendigSeksjon;
   }
   
-  // Oppvarming
-  const oppvarmingMatch = salgsoppgaveText.match(/oppvarming[^.]*?([^.]*)/i);
-  if (oppvarmingMatch) {
-    info.oppvarming = oppvarmingMatch[0].substring(0, 200);
-  } else if (text.includes('oppvarming') || text.includes('varme')) {
-    const oppvarmingIndex = text.indexOf('oppvarming') !== -1 ? text.indexOf('oppvarming') : text.indexOf('varme');
-    const context = salgsoppgaveText.substring(Math.max(0, oppvarmingIndex - 100), oppvarmingIndex + 300);
-    info.oppvarming = context;
+  // **UTVIDET: Tekniske installasjoner**
+  const tekniskeSeksjon = extractSectionContent(salgsoppgaveText, ['tekniske installasjoner', 'installasjoner', 'teknisk', 'vann og avløp']);
+  if (tekniskeSeksjon) {
+    info.tekniskeInstallasjoner = tekniskeSeksjon;
+  }
+  
+  // Parkering - utvidet søk
+  const parkeringContext = extractContextualInfo(salgsoppgaveText, ['parkering', 'garasje', 'bil', 'parkere'], 300);
+  if (parkeringContext) {
+    info.parkering = parkeringContext;
+  }
+  
+  // Oppvarming - utvidet søk
+  const oppvarmingContext = extractContextualInfo(salgsoppgaveText, ['oppvarming', 'varme', 'fyring', 'elektrisk oppvarming', 'varmepumpe', 'fjernvarme'], 300);
+  if (oppvarmingContext) {
+    info.oppvarming = oppvarmingContext;
   }
   
   // Ventilasjon
-  if (text.includes('ventilasjon') || text.includes('lufting')) {
-    const ventIndex = text.indexOf('ventilasjon') !== -1 ? text.indexOf('ventilasjon') : text.indexOf('lufting');
-    const context = salgsoppgaveText.substring(Math.max(0, ventIndex - 100), ventIndex + 300);
-    info.ventilasjon = context;
+  const ventilasjonContext = extractContextualInfo(salgsoppgaveText, ['ventilasjon', 'lufting', 'mekanisk ventilasjon', 'ventilasjonsanlegg'], 200);
+  if (ventilasjonContext) {
+    info.ventilasjon = ventilasjonContext;
   }
   
-  // Teknisk tilstand
-  if (text.includes('teknisk tilstand') || text.includes('tilstandsgrad')) {
-    const tekIndex = text.indexOf('teknisk tilstand') !== -1 ? text.indexOf('teknisk tilstand') : text.indexOf('tilstandsgrad');
-    const context = salgsoppgaveText.substring(Math.max(0, tekIndex - 100), tekIndex + 400);
-    info.tekniskTilstand = context;
+  // Teknisk tilstand - utvidet
+  const tekniskTilstandContext = extractContextualInfo(salgsoppgaveText, ['teknisk tilstand', 'tilstandsgrad', 'standard', 'vedlikeholdsbehov'], 400);
+  if (tekniskTilstandContext) {
+    info.tekniskTilstand = tekniskTilstandContext;
   }
   
-  // Baderom
-  if (text.includes('baderom') || text.includes('bad ')) {
-    const badIndex = text.indexOf('baderom') !== -1 ? text.indexOf('baderom') : text.indexOf('bad ');
-    const context = salgsoppgaveText.substring(Math.max(0, badIndex - 50), badIndex + 200);
-    info.baderom = context;
+  // Baderom - utvidet med størrelse
+  const baderomContext = extractContextualInfo(salgsoppgaveText, ['baderom', 'bad ', 'dusj', 'toalett', 'wc'], 300);
+  if (baderomContext) {
+    info.baderom = baderomContext;
   }
   
-  // Kjøkken
-  if (text.includes('kjøkken')) {
-    const kjokkenIndex = text.indexOf('kjøkken');
-    const context = salgsoppgaveText.substring(Math.max(0, kjokkenIndex - 50), kjokkenIndex + 200);
-    info.kjokken = context;
+  // Kjøkken - utvidet med størrelse
+  const kjokkenContext = extractContextualInfo(salgsoppgaveText, ['kjøkken', 'køkken', 'kjøkkenet'], 300);
+  if (kjokkenContext) {
+    info.kjokken = kjokkenContext;
   }
   
-  // Balkong/terrasse
-  if (text.includes('balkong') || text.includes('terrasse')) {
-    const balkongIndex = text.indexOf('balkong') !== -1 ? text.indexOf('balkong') : text.indexOf('terrasse');
-    const context = salgsoppgaveText.substring(Math.max(0, balkongIndex - 50), balkongIndex + 200);
-    info.balkongTerrasse = context;
+  // Balkong/terrasse - utvidet
+  const uteplassContext = extractContextualInfo(salgsoppgaveText, ['balkong', 'terrasse', 'uteplass', 'loggia'], 200);
+  if (uteplassContext) {
+    info.balkongTerrasse = uteplassContext;
   }
   
-  // Energi
-  if (text.includes('energi') || text.includes('strøm')) {
-    const energiIndex = text.indexOf('energi') !== -1 ? text.indexOf('energi') : text.indexOf('strøm');
-    const context = salgsoppgaveText.substring(Math.max(0, energiIndex - 50), energiIndex + 200);
-    info.energi = context;
+  // Energi - utvidet
+  const energiContext = extractContextualInfo(salgsoppgaveText, ['energi', 'strøm', 'el-', 'energimerking', 'energiklasse'], 200);
+  if (energiContext) {
+    info.energi = energiContext;
   }
   
-  // Vedlikehold
-  if (text.includes('vedlikehold') || text.includes('oppussing')) {
-    const vedlikeholdIndex = text.indexOf('vedlikehold') !== -1 ? text.indexOf('vedlikehold') : text.indexOf('oppussing');
-    const context = salgsoppgaveText.substring(Math.max(0, vedlikeholdIndex - 50), vedlikeholdIndex + 300);
-    info.vedlikehold = context;
+  // Vedlikehold - utvidet
+  const vedlikeholdContext = extractContextualInfo(salgsoppgaveText, ['vedlikehold', 'oppussing', 'rehabilitering', 'renovering', 'oppgradert'], 300);
+  if (vedlikeholdContext) {
+    info.vedlikehold = vedlikeholdContext;
+  }
+  
+  // **NYT: Felleskostnader og økonomi**
+  const okonomiContext = extractContextualInfo(salgsoppgaveText, ['felleskostnad', 'kommunale avgifter', 'eiendomsskatt', 'fellesgjeld'], 400);
+  if (okonomiContext) {
+    info.okonomi = okonomiContext;
   }
   
   console.log('✅ Ekstraherte detaljert info:', Object.keys(info));
+  console.log('📊 Antall rom funnet:', Object.keys(info.romInformasjon || {}).length);
   return info;
+}
+
+// **NY HJELPEFUNKSJON**: Ekstraherer rom-detaljer med størrelser
+function extractRoomDetails(text) {
+  const romInfo = {};
+  
+  // Avanserte mønstre for rom med størrelser
+  const romMønstre = [
+    // Format: "Soverom (11,2 m²)" eller "Soverom 11,2 m²"
+    /(?:^|\n)\s*([A-Za-zæøåÆØÅ\/]+(?:\s+\d+)?)\s*(?:\(|:)?\s*(\d+[,.]?\d*)\s*m[²2]\s*(?:\)|$)/gim,
+    // Format: "Entré 3,0 m²"
+    /(?:^|\n)\s*([A-Za-zæøåÆØÅ\/]+)\s+(\d+[,.]?\d*)\s*m[²2]/gim,
+    // Format: "Soverom: 11,2 m²"
+    /([A-Za-zæøåÆØÅ\/]+)\s*:\s*(\d+[,.]?\d*)\s*m[²2]/gim,
+    // Format i beskrivelse som "Stue/kjøkken (29,5 m²)"
+    /([A-Za-zæøåÆØÅ\/]+(?:\s*\/\s*[A-Za-zæøåÆØÅ\/]+)?)\s*\(\s*(\d+[,.]?\d*)\s*m[²2]\s*\)/gim
+  ];
+  
+  for (const pattern of romMønstre) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const romNavn = match[1].trim().toLowerCase();
+      const størrelse = parseFloat(match[2].replace(',', '.'));
+      
+      // Filtrer bort ugyldige størrelser
+      if (størrelse > 0.5 && størrelse < 200) {
+        // Normaliser romnavn
+        const normalizedName = normalizeRoomName(romNavn);
+        if (normalizedName) {
+          romInfo[normalizedName] = {
+            originalNavn: match[1].trim(),
+            størrelse: størrelse,
+            enhet: 'm²',
+            funnetMønster: pattern.toString().substring(0, 50) + '...'
+          };
+        }
+      }
+    }
+  }
+  
+  return romInfo;
+}
+
+// **NY HJELPEFUNKSJON**: Normaliser romnavn
+function normalizeRoomName(romNavn) {
+  const navn = romNavn.toLowerCase().trim();
+  
+  // Mapping av vanlige rom-varianter
+  const romMapping = {
+    'entré': 'entré',
+    'entre': 'entré',
+    'soverom': 'soverom',
+    'sovrom': 'soverom',
+    'sov-rom': 'soverom',
+    'bad': 'bad',
+    'baderom': 'bad',
+    'stue': 'stue',
+    'stue/kjøkken': 'stue_kjøkken',
+    'stue kjøkken': 'stue_kjøkken',
+    'kjøkken': 'kjøkken',
+    'køkken': 'kjøkken',
+    'gang': 'gang',
+    'bod': 'bod',
+    'wc': 'wc',
+    'toalett': 'wc',
+    'vaskerom': 'vaskerom',
+    'kontor': 'kontor',
+    'arbeidsrom': 'kontor',
+    'garderobe': 'garderobe',
+    'walk-in closet': 'garderobe',
+    'balkong': 'balkong',
+    'terrasse': 'terrasse',
+    'veranda': 'veranda'
+  };
+  
+  // Sjekk direkte mapping først
+  if (romMapping[navn]) {
+    return romMapping[navn];
+  }
+  
+  // Sjekk delvis matching
+  for (const [key, value] of Object.entries(romMapping)) {
+    if (navn.includes(key) || key.includes(navn)) {
+      return value;
+    }
+  }
+  
+  // Returner originalnavnet hvis ikke funnet i mapping
+  if (navn.length > 2 && navn.length < 30) {
+    return navn;
+  }
+  
+  return null;
+}
+
+// **NY HJELPEFUNKSJON**: Ekstraherer kontekstuell informasjon
+function extractContextualInfo(text, searchTerms, contextLength = 200) {
+  const lowerText = text.toLowerCase();
+  
+  for (const term of searchTerms) {
+    const index = lowerText.indexOf(term.toLowerCase());
+    if (index !== -1) {
+      const start = Math.max(0, index - 50);
+      const end = Math.min(text.length, index + contextLength);
+      return text.substring(start, end).trim();
+    }
+  }
+  
+  return null;
+}
+
+// **NY HJELPEFUNKSJON**: Ekstraherer innhold fra spesifikke seksjoner
+function extractSectionContent(text, sectionTitles) {
+  const lowerText = text.toLowerCase();
+  
+  for (const title of sectionTitles) {
+    const titleIndex = lowerText.indexOf(title.toLowerCase());
+    if (titleIndex !== -1) {
+      // Finn slutten av seksjonen (neste store tittel eller maks 800 tegn)
+      const sectionStart = titleIndex;
+      let sectionEnd = text.length;
+      
+      // Se etter neste seksjon
+      const nextSectionPattern = /\n\s*[A-ZÆØÅ][A-Za-zæøå\s]{10,50}\s*\n/g;
+      nextSectionPattern.lastIndex = titleIndex + title.length;
+      const nextMatch = nextSectionPattern.exec(text);
+      if (nextMatch) {
+        sectionEnd = nextMatch.index;
+      }
+      
+      // Begrens til maksimalt 1000 tegn
+      sectionEnd = Math.min(sectionEnd, sectionStart + 1000);
+      
+      return text.substring(sectionStart, sectionEnd).trim();
+    }
+  }
+  
+  return null;
 }
 
 // Funksjon for å hente salgsoppgavetekst fra dokumentside
