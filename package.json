@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@boligplattform/web",
+    "dev:mobile": "node scripts/mobile-dev.js",
     "build": "npm run build --workspace=@boligplattform/web",
     "lint": "npm run lint --workspaces",
     "lint:check": "npm run lint:check --workspaces",
@@ -26,6 +27,7 @@
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.37.5",
     "prettier": "^3.0.0",
+    "qrcode-terminal": "^0.12.0",
     "typescript": "^4.9.5"
   }
 }

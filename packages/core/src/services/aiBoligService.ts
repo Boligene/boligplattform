@@ -27,7 +27,7 @@ export class AIBoligService {
   static async scrapeFinnUrl(url: string): Promise<BoligScrapingData> {
     console.log('🔍 Scraper data fra:', url);
     
-    const response = await fetch('http://localhost:3001/api/parse-finn', {
+    const response = await fetch('/api/parse-finn', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -38,7 +38,7 @@ export class AIBoligService {
     if (!response.ok) {
       console.error('🔌 Backend respons feil:', response.status, response.statusText);
       if (response.status === 0 || response.status >= 500) {
-        throw new Error('Kan ikke koble til backend-server. Sjekk at serveren kjører på port 3001.');
+        throw new Error('Kan ikke koble til backend-server. Sjekk at serveren kjører og at proxy fungerer.');
       }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -147,7 +147,7 @@ export class AIBoligService {
 
     try {
       // Bruk det nye /api/full-analysis endepunktet som kjører begge analyser parallellt
-      const response = await fetch('http://localhost:3001/api/full-analysis', {
+      const response = await fetch('/api/full-analysis', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -223,10 +223,11 @@ export class AIBoligService {
       
       // Sjekk om det er tilkoblingsproblem
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        console.error('🔌 TILKOBLINGSFEIL: Kan ikke nå backend på localhost:3001');
+        console.error('🔌 TILKOBLINGSFEIL: Kan ikke nå backend');
         console.error('   - Sjekk at backend-serveren kjører på port 3001');
         console.error('   - Kjør: cd apps/api/finn-scraper && node server.js');
-        throw new Error('Kan ikke koble til backend-server. Sjekk at serveren kjører på port 3001.');
+        console.error('   - Eller bruk: npm run dev:mobile');
+        throw new Error('Kan ikke koble til backend-server. Sjekk at serveren kjører og at proxy fungerer.');
       }
       
       // Fallback til standard analyse
@@ -240,7 +241,7 @@ export class AIBoligService {
     console.log('📋 Starter kun salgsoppgave-analyse for:', url);
 
     try {
-      const response = await fetch('http://localhost:3001/api/analyse-salgsoppgave', {
+      const response = await fetch('/api/analyse-salgsoppgave', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -275,7 +276,7 @@ export class AIBoligService {
         console.log('📁 Analyserer opplastet PDF-fil:', file.name);
       } else if (text) {
         // For tekst, send som JSON i stedet for FormData
-        const response = await fetch('http://localhost:3001/api/analyse-takst', {
+        const response = await fetch('/api/analyse-takst', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -295,7 +296,7 @@ export class AIBoligService {
       }
 
       // For PDF-fil
-      const response = await fetch('http://localhost:3001/api/analyse-takst', {
+      const response = await fetch('/api/analyse-takst', {
         method: 'POST',
         body: formData,
       });
@@ -924,7 +925,7 @@ GI ALLTID EKSAKTE SVAR basert på informasjonen. Hvis brukeren spør "hvor stort
       
       console.log('📤 Sender PDF til backend for analyse...');
       
-      const response = await fetch('http://localhost:3001/api/analyse-salgsoppgave-pdf', {
+      const response = await fetch('/api/analyse-salgsoppgave-pdf', {
         method: 'POST',
         body: formData,
       });

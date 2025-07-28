@@ -3480,8 +3480,10 @@ app.get("/api/ping", (req, res) => {
 });
 
 const PORT = 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Express-server kjører på http://localhost:${PORT}`);
+const HOST = '0.0.0.0'; // Listen on all network interfaces for mobile access
+app.listen(PORT, HOST, () => {
+console.log(`🚀 Express-server kjører på http://localhost:${PORT}`);
+console.log(`📱 Mobile access: http://[YOUR_IP]:${PORT}`);
 });
 
 // Nytt endpoint for manuell PDF-upload av salgsoppgave

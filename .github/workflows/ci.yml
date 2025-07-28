@@ -52,7 +52,7 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: npm test --if-present
+        run: npm run test --if-present
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -60,6 +60,50 @@ jobs:
         with:
           name: build-files
           path: dist/
+          retention-days: 7
+
+  # Mobile performance testing with Lighthouse
+  lighthouse-mobile:
+    name: Lighthouse Mobile Performance
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli
+
+      - name: Build project
+        run: npm run build
+
+      - name: Start local server
+        run: |
+          cd apps/web
+          npx vite preview --port 4173 &
+          sleep 10
+        
+      - name: Run Lighthouse CI Mobile
+        run: |
+          npx lhci autorun --config=lhci-mobile.json || exit 1
+        env:
+          LHCI_BUILD_CONTEXT__CURRENT_HASH: ${{ github.sha }}
+
+      - name: Upload Lighthouse results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-mobile-results
+          path: .lighthouseci/
           retention-days: 7
 
   # Type checking
@@ -106,7 +150,7 @@ jobs:
   deploy-preview:
     name: Deploy Preview
     runs-on: ubuntu-latest
-    needs: [build-and-test, type-check]
+    needs: [build-and-test, type-check, lighthouse-mobile]
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout code
@@ -126,14 +170,14 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '🚀 Preview build completed! Check the deployment status in the Actions tab.'
+              body: '🚀 Preview build completed! Mobile performance tests passed. Check the deployment status in the Actions tab.'
             })
 
   # Deploy to production (only on main branch)
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [build-and-test, type-check, security]
+    needs: [build-and-test, type-check, security, lighthouse-mobile]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
@@ -149,7 +193,4 @@ jobs:
       - name: Deploy to production
         run: |
           echo "🚀 Deploying to production..."
-          # Add your actual deployment commands here
-          # For example: netlify deploy --prod --dir=dist
-          # Or: vercel --prod
           echo "✅ Production deployment completed!" 
