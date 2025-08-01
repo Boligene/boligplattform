@@ -1386,33 +1386,52 @@ function extractSalgsoppgaveFakta(salgsoppgaveText) {
     }
   }
   
-  // **ANTALL ROM** - omfattende regex-mønstre
+  // **ANTALL ROM** - forbedrede regex-mønstre med høyere prioritet
   const rommønstre = [
-    // Standard mønstre
-    /(?:antall\s+)?rom[\s\n]*:?\s*(\d+)/i,
-    /(\d+)\s*rom(?!\s*leilighet)/i,
-    /(\d+)\s*stk\s*rom/i,
-    /(\d+)\s*rom\s*(?:i\s*alt|totalt)/i,
-    // P-rom (primærrom)
-    /p-rom[\s\n]*:?\s*(\d+)/i,
-    /primærrom[\s\n]*:?\s*(\d+)/i,
-    // Fra beskrivelser
+    // Høyest prioritet - eksakte feltnavn
+    /(?:antall\s+)?rom[\s\n]*:?\s*(\d+)(?!\d)/i,
+    /rom[\s\n]*:?\s*(\d+)(?!\d)(?!\s*leilighet)/i,
+    // P-rom og primærrom (ofte mer nøyaktig)
+    /p-rom[\s\n]*:?\s*(\d+)(?!\d)/i,
+    /primærrom[\s\n]*:?\s*(\d+)(?!\d)/i,
+    // Fra leilighets-/boligbeskrivelse
     /(\d+)-roms?\s*(?:leilighet|bolig)/i,
-    /boligen\s+har\s*(\d+)\s*rom/i,
-    /(?:har|med|inkludert)\s*(\d+)\s*rom/i,
-    // Romfordeling
-    /romfordeling[\s\S]*?(\d+)\s*rom/i,
-    // Med parenteser
+    // Spesifikke kontekst-mønstre
+    /boligen\s+har\s*(\d+)\s*rom(?!\s*leilighet)/i,
+    /(?:består\s+av|har|med|inkludert)\s*(\d+)\s*rom(?!\s*leilighet)/i,
+    // Generelle mønstre (lavere prioritet)
+    /(\d+)\s*rom(?!\s*(?:leilighet|soverom|bad|stue))/i,
+    /(\d+)\s*stk\s*rom(?!\s*leilighet)/i,
+    /(\d+)\s*rom\s*(?:i\s*alt|totalt)/i,
+    // Romfordeling og strukturert info
+    /romfordeling[\s\S]*?(\d+)\s*rom(?!\s*leilighet)/i,
+    // Parenteser og bindestrek-format
     /rom\s*\((\d+)\)/i,
-    /(\d+)[-/]roms?/i
+    /(\d+)[-/]roms?(?!\s*leilighet)/i
   ];
   
+  // **FORBEDRET ROM-EKSTRAKSJON MED KONTEKST-VALIDERING**
   for (const pattern of rommønstre) {
     const match = salgsoppgaveText.match(pattern);
     if (match && match[1] && parseInt(match[1]) > 0 && parseInt(match[1]) < 50) {
-      fakta.antallRom = match[1];
-      console.log(`🎯 Fant antall rom fra salgsoppgave: ${match[1]} (mønster: ${pattern.toString().substring(0,50)}...)`);
-      break;
+      const romAntall = parseInt(match[1]);
+      
+      // Ekstra validering: sjekk at det ikke er "2-roms leilighet" når vi faktisk har 3 rom
+      const matchedText = match[0].toLowerCase();
+      const isLowPriorityMatch = matchedText.includes('leilighet') || matchedText.includes('bolig');
+      
+      // For "X-roms leilighet" sjekk om det finnes mer spesifikk info
+      if (isLowPriorityMatch && !fakta.antallRom) {
+        // Sett verdien, men fortsett å lete etter bedre match
+        fakta.antallRom = match[1];
+        console.log(`📝 Tentativ antall rom fra salgsoppgave: ${match[1]} (lavere prioritet: ${pattern.toString().substring(0,40)}...)`);
+        continue; // Ikke break, fortsett å lete
+      } else if (!isLowPriorityMatch) {
+        // Høy prioritet match - overstyr eventuell tidligere verdi
+        fakta.antallRom = match[1];
+        console.log(`🎯 Fant antall rom fra salgsoppgave: ${match[1]} (høy prioritet: ${pattern.toString().substring(0,40)}...)`);
+        break;
+      }
     }
   }
   
@@ -4053,83 +4072,67 @@ app.post("/api/analyse-salgsoppgave-pdf", (req, res, next) => {
       source: 'manual_pdf_upload'
     };
 
-    // OpenAI-analyse hvis API-nøkkel er tilgjengelig
+    // **OPPGRADERT OPENAI-ANALYSE MED FORBEDRET INTELLIGENS**
     let analysis = null;
     const openaiApiKey = process.env.OPENAI_API_KEY;
     
     if (openaiApiKey && tekst.length > 100) {
-      console.log('🤖 Sender til OpenAI for salgsoppgave-analyse...');
+      console.log('🤖 Bruker forbedret intelligentOpenAIAnalysis for PDF-analyse...');
       console.log('📊 Tekst lengde:', tekst.length, 'tegn');
       
       try {
-        // Bygg utvidet prompt med strukturerte fakta
-        let strukturerteFakta = '';
-        if (Object.keys(salgsoppgaveFakta).length > 0) {
-          strukturerteFakta = `\n\n**STRUKTURERTE FAKTA EKSTRAHERT FRA SALGSOPPGAVE (prioriter denne informasjonen):**\n`;
-          for (const [key, value] of Object.entries(salgsoppgaveFakta)) {
-            strukturerteFakta += `- ${key}: ${value}\n`;
-          }
-          strukturerteFakta += `\n**VIKTIG:** Bruk disse strukturerte fakta som hovedkilde i din analyse.\n`;
-        }
-        
-        const fullPrompt = `Analyser denne salgsoppgaven som ble lastet opp manuelt:${strukturerteFakta}\n\n**FULL SALGSOPPGAVE-TEKST:**\n${tekst.substring(0, 10000)}`;
-        
-        const completion = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            {
-              role: "user", 
-              content: fullPrompt
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 2000
-        });
-        
-        const responseContent = completion.choices[0].message.content;
-        
-        try {
-          // Prøv å parse direkte først
-          analysis = JSON.parse(responseContent);
-          console.log('✅ OpenAI salgsoppgave-analyse fullført (direkte parsing)');
-        } catch (parseError) {
-          console.log('⚠️ Direkte parsing feilet, prøver å finne JSON i respons');
-          
-          // Prøv å finne JSON innenfor markdown code blocks
-          let jsonString = responseContent;
-          jsonString = jsonString.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-          
-          const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            try {
-              analysis = JSON.parse(jsonMatch[0]);
-              console.log('✅ OpenAI salgsoppgave-analyse fullført (ekstrahert JSON)');
-            } catch (secondParseError) {
-              console.log('⚠️ Kunne ikke parse JSON fra OpenAI, bruker rå respons');
-              analysis = {
-                raaAnalyse: responseContent,
-                feil: 'Kunne ikke parse JSON fra OpenAI-respons'
-              };
-            }
-          } else {
-            console.log('⚠️ Ingen JSON funnet i OpenAI respons, bruker rå respons');
-            analysis = {
-              raaAnalyse: responseContent,
-              feil: 'Ingen JSON funnet i OpenAI-respons'
-            };
-          }
-        }
+        // Bruk den nye intelligente OpenAI-analyse funksjonen
+        analysis = await intelligentOpenAIAnalysis(tekst, salgsoppgaveFakta);
+        console.log('✅ Forbedret OpenAI PDF-analyse fullført med gpt-4o-mini og strukturert respons');
         
       } catch (openaiError) {
-        console.error('❌ OpenAI API feil:', openaiError);
-        analysis = {
-          feil: `OpenAI API feil: ${openaiError.message}`,
-          tekst: tekst.substring(0, 1000) + '...'
-        };
+        console.error('❌ OpenAI API feil ved PDF-analyse:', openaiError);
+        
+        // Fallback til enklere analyse hvis intelligent analyse feiler
+        try {
+          console.log('🔄 Fallback til enkel OpenAI-analyse...');
+          const fallbackPrompt = `Analyser denne salgsoppgaven og returner JSON:\n\n${tekst.substring(0, 8000)}`;
+          
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+              {
+                role: "system",
+                content: buildDynamicSystemPrompt(salgsoppgaveFakta)
+              },
+              {
+                role: "user", 
+                content: fallbackPrompt
+              }
+            ],
+            temperature: 0.3,
+            max_tokens: 4000
+          });
+          
+          const responseContent = completion.choices[0].message.content;
+          
+          try {
+            analysis = JSON.parse(responseContent);
+            console.log('✅ Fallback OpenAI-analyse fullført');
+          } catch (parseError) {
+            const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              analysis = JSON.parse(jsonMatch[0]);
+            } else {
+              analysis = {
+                konklusjon: responseContent,
+                _fallbackMode: true
+              };
+            }
+          }
+          
+        } catch (fallbackError) {
+          console.error('❌ Også fallback OpenAI feilet:', fallbackError);
+          analysis = {
+            feil: `OpenAI API feil: ${openaiError.message}`,
+            tekst: tekst.substring(0, 1000) + '...'
+          };
+        }
       }
     } else if (!openaiApiKey) {
       console.log('⚠️ Ingen OpenAI API-nøkkel, returnerer kun ekstraherte data');
