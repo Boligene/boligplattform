@@ -16,7 +16,38 @@ const pdfParse = require("pdf-parse");
 const { OpenAI } = require("openai");
 const fs = require("fs");
 const path = require('path');
+const crypto = require('crypto');
 require('dotenv').config();
+
+// **REDIS CACHING SETUP** - Intelligent cache med fallback
+let redis = null;
+try {
+  const Redis = require('ioredis');
+  redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+    maxRetriesPerRequest: 1,
+    lazyConnect: true,
+    showFriendlyErrorStack: true,
+    connectTimeout: 5000,
+    retryDelayOnFailover: 100
+  });
+  
+  redis.on('connect', () => {
+    console.log('✅ Redis tilkoblet - caching aktivert');
+  });
+  
+  redis.on('error', (err) => {
+    console.log('⚠️ Redis tilkobling feilet:', err.message);
+    console.log('💾 Fortsetter uten cache-funksjonalitet');
+    redis = null; // Disable caching hvis Redis ikke virker
+  });
+  
+  redis.on('close', () => {
+    console.log('📴 Redis tilkobling lukket');
+  });
+} catch (error) {
+  console.log('⚠️ Redis ikke tilgjengelig:', error.message);
+  console.log('💾 Fortsetter uten cache-funksjonalitet');
+}
 
 const app = express();
 app.use(cors());
@@ -905,6 +936,119 @@ async function findSalgsoppgavePDF(page, url) {
 }
 
 // Forbedret funksjon for å laste ned og parse PDF med bedre feilhåndtering og cleanup
+// **OCR FALLBACK FUNKSJON** - Konverterer PDF til bilder og kjører OCR
+async function performOCROnPDF(pdfBuffer, numPages) {
+  console.log('🔍 === STARTER OCR FALLBACK ===');
+  
+  let pdf2pic, tesseract, fs, path;
+  try {
+    pdf2pic = require('pdf2pic');
+    tesseract = require('tesseract.js');
+    fs = require('fs');
+    path = require('path');
+  } catch (importError) {
+    throw new Error('OCR avhengigheter ikke installert. Kjør: npm i pdf2pic tesseract.js');
+  }
+  
+  const tempDir = path.join(__dirname, 'temp_ocr');
+  
+  try {
+    // Opprett temp-mappe
+    fs.mkdirSync(tempDir, { recursive: true });
+    
+    // Konverter PDF til bilder (kun første 3 sider for å spare tid)
+    const maxPages = Math.min(3, numPages || 1);
+    console.log(`📄 Konverterer ${maxPages} sider til bilder for OCR...`);
+    
+    const convert = pdf2pic.fromBuffer(pdfBuffer, {
+      density: 300,           // Høy oppløsning for bedre OCR
+      saveFilename: 'page',
+      savePath: tempDir,
+      format: 'png',
+      width: 2480,           // A4 i 300 DPI
+      height: 3508
+    });
+    
+    let ocrText = '';
+    const processedPages = [];
+    
+    // Behandle hver side
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+      try {
+        console.log(`🔍 OCR behandler side ${pageNum}/${maxPages}...`);
+        
+        // Konverter side til bilde
+        const imageResult = await convert(pageNum, { responseType: 'image' });
+        const imagePath = imageResult.path;
+        
+        if (!fs.existsSync(imagePath)) {
+          console.log(`❌ Bilde ikke opprettet for side ${pageNum}`);
+          continue;
+        }
+        
+        // Kjør OCR med norsk og engelsk språkstøtte
+        const { data: { text, confidence } } = await tesseract.recognize(imagePath, 'nor+eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              console.log(`   📱 OCR side ${pageNum}: ${Math.round(m.progress * 100)}%`);
+            }
+          },
+          tessedit_pageseg_mode: 6,  // Uniform text block
+          preserve_interword_spaces: 1,
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzæøåÆØÅ0123456789 .,;:!?-()[]{}/*&%$#@+=<>|\\n\\t'
+        });
+        
+        if (text && text.length > 30) {
+          const cleanedText = text
+            .replace(/\n{3,}/g, '\n\n')  // Reduser multiple line breaks
+            .replace(/\s{3,}/g, ' ')     // Reduser multiple spaces
+            .trim();
+            
+          ocrText += `\n--- SIDE ${pageNum} ---\n${cleanedText}`;
+          processedPages.push({
+            page: pageNum,
+            textLength: cleanedText.length,
+            confidence: Math.round(confidence)
+          });
+          
+          console.log(`✅ OCR side ${pageNum}: ${cleanedText.length} tegn (${Math.round(confidence)}% konfidens)`);
+        } else {
+          console.log(`⚠️ OCR side ${pageNum}: Utilstrekkelig tekst ekstrahert`);
+        }
+        
+        // Rydd opp bildefil
+        try {
+          fs.unlinkSync(imagePath);
+        } catch (cleanupError) {
+          console.log(`⚠️ Kunne ikke slette temp-fil: ${imagePath}`);
+        }
+        
+      } catch (pageError) {
+        console.log(`❌ OCR feilet for side ${pageNum}:`, pageError.message);
+      }
+    }
+    
+    // Logg sammendrag
+    if (processedPages.length > 0) {
+      const avgConfidence = processedPages.reduce((sum, p) => sum + p.confidence, 0) / processedPages.length;
+      console.log(`🎯 OCR sammendrag: ${processedPages.length}/${maxPages} sider, ${ocrText.length} tegn totalt, ${Math.round(avgConfidence)}% gjennomsnittlig konfidens`);
+    }
+    
+    return ocrText.length > 0 ? ocrText : null;
+    
+  } finally {
+    // Rydd opp temp-mappe
+    try {
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        console.log('🧹 OCR temp-filer ryddet opp');
+      }
+    } catch (cleanupError) {
+      console.log('⚠️ Kunne ikke rydde OCR temp-mappe:', cleanupError.message);
+    }
+  }
+}
+
 async function downloadAndParsePDF(pdfUrl, browser) {
   console.log('📥 === LASTER NED PDF ===');
   console.log('📥 URL:', pdfUrl);
@@ -956,16 +1100,34 @@ async function downloadAndParsePDF(pdfUrl, browser) {
       console.log('📊 Antall sider:', pdfData.numpages);
       console.log('📊 Tekstlengde:', pdfData.text.length, 'tegn');
       
-      // Sjekk om vi faktisk fikk tekst
-      if (pdfData.text.length < 50) {
-        console.log('⚠️ PDF inneholder svært lite tekst:', pdfData.text.substring(0, 100));
+      // **FORBEDRET PDF-TEKSTHÅNDTERING MED OCR FALLBACK**
+      if (pdfData.text.length < 100) {
+        console.log('⚠️ PDF har utilstrekkelig tekst, starter OCR-fallback...');
+        console.log('📊 Opprinnelig tekstlengde:', pdfData.text.length);
         
-        // Prøv å hente metadata for mer info
-        const metadata = pdfData.info || {};
-        console.log('📊 PDF metadata:', JSON.stringify(metadata, null, 2));
-        
-        if (pdfData.text.length === 0) {
-          throw new Error('PDF inneholder ingen lesbar tekst (kan være scannet dokument eller passordbeskyttet)');
+        // Prøv OCR som fallback
+        try {
+          const ocrText = await performOCROnPDF(buffer, pdfData.numpages);
+          if (ocrText && ocrText.length > pdfData.text.length) {
+            console.log(`🎯 OCR forbedret tekst: ${pdfData.text.length} → ${ocrText.length} tegn`);
+            pdfData.text = ocrText;
+            pdfData._ocrEnhanced = true;
+            pdfData._ocrImprovement = ocrText.length - (pdfData.text?.length || 0);
+          } else {
+            console.log('⚠️ OCR ga ikke bedre resultat');
+          }
+        } catch (ocrError) {
+          console.log('❌ OCR fallback feilet:', ocrError.message);
+          
+          // Hvis fortsatt for lite tekst, gi detaljert feilmelding
+          if (pdfData.text.length < 50) {
+            const metadata = pdfData.info || {};
+            console.log('📊 PDF metadata:', JSON.stringify(metadata, null, 2));
+            
+            if (pdfData.text.length === 0) {
+              throw new Error('PDF inneholder ingen lesbar tekst (kan være scannet dokument eller passordbeskyttet)');
+            }
+          }
         }
       }
       
@@ -1011,6 +1173,110 @@ async function downloadAndParsePDF(pdfUrl, browser) {
       }
     }
   }
+}
+
+// **FORBEDRET BRA-EKSTRAKSJONSLOGIKK** - Intelligent 4-fase prioritering
+function extractBRAWithPriority(salgsoppgaveText) {
+  console.log('🎯 === FORBEDRET BRA-EKSTRAKSJON STARTER ===');
+  
+  if (!salgsoppgaveText || salgsoppgaveText.length < 50) {
+    console.log('⚠️ Ikke nok tekst for BRA-ekstraksjon');
+    return null;
+  }
+
+  const arealCandidates = [];
+  
+  // FASE 1: Definer søkemønstre med prioritetspoeng
+  const patterns = [
+    // Høyest prioritet - eksakte BRA-betegnelser
+    { regex: /(?:^|\n)\s*(?:bruksareal|^bra)[\s\n]*:?\s*(\d{1,4})\s*(?:m²|m2|kvm)?/gi, priority: 100, label: 'bruksareal' },
+    { regex: /(?:^|\n)\s*(?:primærareal|p-rom)[\s\n]*:?\s*(\d{1,4})\s*(?:m²|m2|kvm)?/gi, priority: 90, label: 'primærareal' },
+    
+    // Medium prioritet - mer spesifikke mønstre
+    { regex: /boligen\s+(?:har|er)(?:\s+på)?\s*(\d{1,4})\s*(?:m²|m2|kvm)/gi, priority: 70, label: 'boligstørrelse' },
+    { regex: /(\d{1,4})\s*(?:m²|m2|kvm)\s+(?:bruksareal|bra|bolig)/gi, priority: 80, label: 'bruksareal_omvendt' },
+    
+    // Lavest prioritet - generelle areal-mønstre  
+    { regex: /(?:^|\n)\s*(?:areal|størrelse)[\s\n]*:?\s*(\d{1,4})\s*(?:m²|m2|kvm)/gi, priority: 50, label: 'generelt_areal' },
+  ];
+  
+  // FASE 2: Filtrer ut uønskede mønstre FØRST
+  const excludePatterns = [
+    /(?:internt|eksternt|bra-[ie]|utvendig|takterrasse|balkong|terrasse|garasje|kjeller(?!.*bra)|loft(?!.*bra)|tomt)/i
+  ];
+  
+  // FASE 3: Samle alle kandidater
+  patterns.forEach(({ regex, priority, label }) => {
+    let match;
+    while ((match = regex.exec(salgsoppgaveText)) !== null) {
+      const fullMatch = match[0];
+      const value = parseInt(match[1], 10);
+      
+      // Hopp over hvis matcher ekskluderte mønstre
+      if (excludePatterns.some(exclude => exclude.test(fullMatch))) {
+        console.log(`❌ Ekskludert: "${fullMatch.trim()}" (uønsket type)`);
+        continue;
+      }
+      
+      // Kun realistiske størrelser
+      if (value >= 15 && value <= 1500) {
+        arealCandidates.push({
+          value,
+          priority,
+          label,
+          context: fullMatch.trim(),
+          position: match.index
+        });
+        console.log(`✅ Kandidat: ${value}m² (${label}, prioritet: ${priority})`);
+      } else {
+        console.log(`❌ Unrealistisk størrelse: ${value}m²`);
+      }
+    }
+  });
+  
+  if (arealCandidates.length === 0) {
+    console.log('❌ Ingen gyldige BRA-kandidater funnet');
+    return null;
+  }
+  
+  // FASE 4: Intelligent prioritering og duplikat-fjerning
+  const grouped = arealCandidates.reduce((acc, candidate) => {
+    const key = candidate.value;
+    if (!acc[key] || acc[key].priority < candidate.priority) {
+      acc[key] = candidate;
+    }
+    return acc;
+  }, {});
+  
+  // Velg beste kandidat basert på prioritet og realisme
+  const best = Object.values(grouped)
+    .sort((a, b) => {
+      // Først etter prioritet, så etter hvor typisk størrelsen er (40-200m² er mest vanlig)
+      const aPriorityBonus = a.priority;
+      const bPriorityBonus = b.priority;
+      const aTypicalBonus = (a.value >= 40 && a.value <= 200) ? 10 : 0;
+      const bTypicalBonus = (b.value >= 40 && b.value <= 200) ? 10 : 0;
+      
+      return (bPriorityBonus + bTypicalBonus) - (aPriorityBonus + aTypicalBonus);
+    })[0];
+  
+  console.log(`🎯 BRA-ekstraksjonsresultat:`, {
+    funnetKandidater: arealCandidates.length,
+    unikkeCandidater: Object.keys(grouped).length,
+    valgtVerdi: best.value,
+    prioritet: best.priority,
+    kontekst: best.context
+  });
+  
+  return {
+    bruksareal: `${best.value} m²`,
+    _metadata: {
+      confidence: best.priority,
+      source: best.label,
+      context: best.context,
+      alternativeCandidates: Object.values(grouped).length
+    }
+  };
 }
 
 // **STEG 4**: Hjelpefunksjon for cleanup av midlertidige filer
@@ -1150,47 +1416,12 @@ function extractSalgsoppgaveFakta(salgsoppgaveText) {
     }
   }
   
-  // **BRUKSAREAL/PRIMÆRAREAL/TOTALAREAL** - omfattende regex-mønstre
-  const arealmønstre = [
-    // Bruksareal
-    /(?:internt\s+)?bruksareal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /bra-i[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /bra[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /p-rom[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /(\d+)\s*(?:m²|kvm|m2).*(?:bruksareal|bra-i|bra)/i,
-    // Primærareal
-    /primærareal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /primær\s*areal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /bop[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /(\d+)\s*(?:m²|kvm|m2).*primærareal/i,
-    // Totalareal
-    /totalareal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /total\s*areal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /bta[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    /(\d+)\s*(?:m²|kvm|m2).*totalareal/i,
-    // Generelt areal
-    /areal[\s\n]*:?\s*(\d+)\s*(?:m²|kvm|m2)(?!\s*tomt)/i,
-    /boligen\s+(?:har|er)\s*(\d+)\s*(?:m²|kvm|m2)/i,
-    // Uten enhet (legges til senere)
-    /(?:internt\s+)?bruksareal[\s\n]*:?\s*(\d+)(?!\s*(?:m²|kvm|m2))/i,
-    /bra-i[\s\n]*:?\s*(\d+)(?!\s*(?:m²|kvm|m2))/i
-  ];
-  
-  for (const pattern of arealmønstre) {
-    const match = salgsoppgaveText.match(pattern);
-    if (match && match[1] && parseInt(match[1]) > 10 && parseInt(match[1]) < 2000) {
-      let value = match[1];
-      // Legg til m² hvis det ikke finnes
-      if (!match[0].includes('m²') && !match[0].includes('kvm') && !match[0].includes('m2')) {
-        value = value + ' m²';
-      } else {
-        // Standardiser til m²
-        value = match[0].replace(/(\d+)\s*(?:kvm|m2)/i, '$1 m²').match(/(\d+\s*m²)/i)?.[1] || value + ' m²';
-      }
-      fakta.bruksareal = value;
-      console.log(`🎯 Fant bruksareal fra salgsoppgave: ${value} (mønster: ${pattern.toString().substring(0,50)}...)`);
-      break;
-    }
+  // **FORBEDRET BRUKSAREAL-EKSTRAKSJON** - Bruker ny intelligent 4-fase prioritering
+  const braResult = extractBRAWithPriority(salgsoppgaveText);
+  if (braResult && braResult.bruksareal) {
+    fakta.bruksareal = braResult.bruksareal;
+    fakta._braMetadata = braResult._metadata;
+    console.log(`🎯 Korrekt BRA funnet via forbedret logikk: ${braResult.bruksareal} (konfidens: ${braResult._metadata.confidence})`);
   }
   
   // **BOLIGTYPE** - omfattende regex-mønstre
@@ -1298,6 +1529,15 @@ function combineDataWithSalgsoppgavePriority(scrapingData, salgsoppgaveFakta) {
   
   let overriddenFields = [];
   
+  // **FORBEDRET VALIDERING**: Filtrer bort interne/eksterne arealer før bruk
+  if (salgsoppgaveFakta && salgsoppgaveFakta.bruksareal) {
+    if (/(?:internt|eksternt|bra-[ie])/i.test(salgsoppgaveFakta.bruksareal)) {
+      console.log('⚠️ Fjerner intern/ekstern BRA som ikke er hovedareal:', salgsoppgaveFakta.bruksareal);
+      delete salgsoppgaveFakta.bruksareal;
+      delete salgsoppgaveFakta._braMetadata;
+    }
+  }
+
   // Overstyr med salgsoppgave-data der det finnes (HOVEDKILDE)
   for (const [salgsoppgaveField, targetField] of Object.entries(fieldMapping)) {
     if (salgsoppgaveFakta && salgsoppgaveFakta[salgsoppgaveField]) {
@@ -1599,7 +1839,258 @@ async function extractSalgsoppgaveFromDocumentPage(docUrl, browser) {
 }
 
 // Hovedfunksjon for å hente og analysere salgsoppgave
-async function getSalgsoppgaveAnalysis(finnUrl) {
+// **INTELLIGENT TOKEN-HÅNDTERING FOR OPENAI**
+function estimateTokens(text) {
+  // Grov estimering: 1 token ≈ 4 tegn for norsk tekst
+  return Math.ceil(text.length / 4);
+}
+
+function compressRelevantContent(text) {
+  console.log('🗜️ Komprimerer tekst for bedre AI-analyse...');
+  
+  // FASE 1: Identifiser og behold viktige seksjoner
+  const importantSections = [
+    'teknisk tilstand', 'tekniske installasjoner', 'bygningsmessig', 'vedlikehold',
+    'pris', 'totalpris', 'prisantydning', 'omkostninger',
+    'bruksareal', 'primærareal', 'areal', 'størrelse', 'rom',
+    'byggeår', 'oppført', 'rehabilitert', 'renovert',
+    'energi', 'oppvarming', 'isolering',
+    'beliggenhet', 'utsikt', 'støy', 'nærmiljø',
+    'felles', 'fellesgjeld', 'husleie', 'felleskostnader',
+    'juridisk', 'rettigheter', 'servitutter', 'byggeforskrifter'
+  ];
+  
+  const lines = text.split('\n');
+  const relevantLines = [];
+  let currentSection = '';
+  
+  for (const line of lines) {
+    const cleanLine = line.toLowerCase().trim();
+    
+    // Sjekk om linjen starter en ny viktig seksjon
+    const matchedSection = importantSections.find(section => 
+      cleanLine.includes(section) && (cleanLine.includes(':') || cleanLine.length < 100)
+    );
+    
+    if (matchedSection) {
+      currentSection = matchedSection;
+      relevantLines.push(line);
+    } else if (currentSection && line.trim().length > 0) {
+      // Fortsett å samle linjer under aktiv seksjon
+      relevantLines.push(line);
+      
+      // Stopp seksjon hvis vi møter en ny overskrift eller tomt avsnitt
+      if (cleanLine.match(/^[a-zæøå\s]+:$/i) || line.trim().length === 0) {
+        currentSection = '';
+      }
+    } else if (cleanLine.length > 0 && (
+      cleanLine.includes('m²') || 
+      cleanLine.includes('kr') || 
+      cleanLine.match(/\d{4}/) || // År
+      cleanLine.includes('bygget') ||
+      cleanLine.includes('renovert')
+    )) {
+      // Behold linjer med viktig numerisk informasjon
+      relevantLines.push(line);
+    }
+  }
+  
+  const compressed = relevantLines.join('\n');
+  console.log(`📊 Tekst komprimert: ${text.length} → ${compressed.length} tegn (${Math.round((1 - compressed.length/text.length) * 100)}% reduksjon)`);
+  
+  return compressed.length > 0 ? compressed : text.substring(0, 12000);
+}
+
+function buildDynamicSystemPrompt(salgsoppgaveFakta) {
+  let prompt = `Du er en norsk boligekspert og eiendomsmegler med lang erfaring. Du får en salgsoppgave fra Finn.no/DNB/andre kilder.
+
+**STRUKTURERTE FAKTA (PRIORITER DISSE):**`;
+
+  if (Object.keys(salgsoppgaveFakta).length > 0) {
+    for (const [key, value] of Object.entries(salgsoppgaveFakta)) {
+      if (key !== '_braMetadata') {
+        prompt += `\n- ${key}: ${value}`;
+      }
+    }
+  } else {
+    prompt += '\nIngen strukturerte fakta ekstrahert - analyser full tekst.';
+  }
+
+  prompt += `\n\nAnalyser informasjonen grundig og gi en profesjonell vurdering på:
+1. TEKNISK TILSTAND: Bygningens standard, vedlikeholdsbehov, installasjoner
+2. RISIKOFAKTORER: Potensielle problemer, fremtidige kostnader, juridiske forhold  
+3. PRISVURDERING: Markedssammenligning, pris per m², posisjon
+4. OPPUSSINGSBEHOV: Nødvendige og ønskede oppgraderinger med kostnader
+5. ANBEFALTE SPØRSMÅL: Viktige spørsmål til visning/megler
+
+Gi svaret som strukturert JSON med disse feltene:
+{
+  "tekniskTilstand": {"score": 1-10, "sammendrag": "tekst", "detaljer": "tekst", "hovedFunn": ["liste"]},
+  "risiko": {"score": 1-10, "sammendrag": "tekst", "risikoer": ["liste"], "anbefalinger": ["liste"]},
+  "prisvurdering": {"score": 1-10, "sammendrag": "tekst", "prisPerM2Vurdering": "tekst", "markedsvurdering": "tekst"},
+  "oppussingBehov": {"nodvendig": ["liste"], "onsket": ["liste"], "estimertKostnad": "tekst"},
+  "anbefalteSporsmal": ["spørsmål"],
+  "konklusjon": "samlet vurdering"
+}
+
+Vær kritisk og realistisk. Base deg på norske forhold.`;
+
+  return prompt;
+}
+
+function truncateIntelligently(text, maxTokens) {
+  const maxChars = maxTokens * 4; // 4 tegn per token
+  
+  if (text.length <= maxChars) {
+    return text;
+  }
+  
+  console.log(`✂️ Trunkerer tekst intelligent: ${text.length} → ${maxChars} tegn`);
+  
+  // Prøv å kutte ved naturlige avsnitt
+  const paragraphs = text.split('\n\n');
+  let result = '';
+  
+  for (const paragraph of paragraphs) {
+    if ((result + paragraph).length <= maxChars) {
+      result += paragraph + '\n\n';
+    } else {
+      break;
+    }
+  }
+  
+  if (result.length < maxChars * 0.8) {
+    // Hvis for mye ble kuttet, ta første del direkte
+    return text.substring(0, maxChars);
+  }
+  
+  return result.trim();
+}
+
+async function intelligentOpenAIAnalysis(salgsoppgaveText, salgsoppgaveFakta) {
+  console.log('🤖 === INTELLIGENT OPENAI ANALYSE ===');
+  
+  // FASE 1: Intelligent tekst-komprimering
+  const compressedText = compressRelevantContent(salgsoppgaveText);
+  
+  // FASE 2: Dynamisk prompt-tilpasning
+  const systemPrompt = buildDynamicSystemPrompt(salgsoppgaveFakta);
+  
+  // FASE 3: Smart token-budsjett
+  const maxTokens = 15000; // gpt-4o-mini kan håndtere mye mer
+  const promptTokens = estimateTokens(systemPrompt);
+  const availableForContent = maxTokens - promptTokens - 2500; // Buffer for respons
+  
+  const finalContent = truncateIntelligently(compressedText, availableForContent);
+  
+  console.log(`🤖 Token-budsjett: ${promptTokens} system + ${estimateTokens(finalContent)} innhold = ${promptTokens + estimateTokens(finalContent)} totalt`);
+  
+  // FASE 4: Forbedret strukturert prompt
+  const structuredFacts = Object.keys(salgsoppgaveFakta).length > 0 
+    ? `**EKSTRAHERTE FAKTA:**\n${Object.entries(salgsoppgaveFakta).map(([k,v]) => `${k}: ${v}`).join('\n')}\n\n`
+    : '';
+  
+  const userContent = `${structuredFacts}**SALGSOPPGAVE-TEKST:**\n${finalContent}`;
+  
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userContent }
+  ];
+  
+  // FASE 5: Optimalisert API-kall
+  return await openai.chat.completions.create({
+    model: 'gpt-4o-mini', // Bedre og billigere enn 3.5-turbo
+    messages,
+    temperature: 0.2,     // Litt mer deterministisk
+    max_tokens: 2500,     // Mer plass for detaljert analyse
+    response_format: { type: "json_object" } // Sikrer JSON-respons
+  });
+}
+
+// **INTELLIGENT REDIS CACHING WRAPPER**
+async function getCachedOrAnalyzeSalgsoppgave(finnUrl) {
+  const cacheKey = `analysis:v2:${crypto.createHash('md5').update(finnUrl).digest('hex')}`;
+  
+  // FASE 1: Prøv cache først
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        
+        // INTELLIGENT CACHE-ALDERSSJEKK
+        const age = Date.now() - (parsed.timestamp || 0);
+        const quality = parsed.qualityScore || 5;
+        
+        // Høykvalitets analyser caches lengre
+        const maxAge = quality > 8 ? 7 * 24 * 60 * 60 * 1000 :  // 7 dager
+                      quality > 5 ? 24 * 60 * 60 * 1000 :        // 1 dag  
+                                    2 * 60 * 60 * 1000;           // 2 timer
+        
+        if (age < maxAge) {
+          console.log(`✅ Cache hit: ${Math.round(age/3600000)}t gammel analyse (kvalitet: ${quality}/10)`);
+          return { ...parsed, _cached: true, _cacheAge: age };
+        } else {
+          console.log(`⏰ Cache utløpt: ${Math.round(age/3600000)}t (maks: ${Math.round(maxAge/3600000)}t)`);
+          await redis.del(cacheKey); // Rydd opp utløpt cache
+        }
+      }
+    } catch (cacheError) {
+      console.log('⚠️ Cache read feilet:', cacheError.message);
+    }
+  }
+  
+  // FASE 2: Utfør analyse
+  console.log('🔄 Utfører ny analyse (ikke cachet)...');
+  const result = await getSalgsoppgaveAnalysisInternal(finnUrl);
+  
+  // FASE 3: Cache resultatet
+  if (redis && result.success) {
+    try {
+      const qualityScore = calculateQualityScore(result);
+      const dataToCache = {
+        ...result,
+        timestamp: Date.now(),
+        qualityScore,
+        _cacheVersion: 'v2'
+      };
+      
+      // TTL basert på kvalitet
+      const ttl = qualityScore > 8 ? 7 * 24 * 3600 :  // 7 dager
+                  qualityScore > 5 ? 24 * 3600 :        // 1 dag
+                                    2 * 3600;            // 2 timer
+      
+      await redis.setex(cacheKey, ttl, JSON.stringify(dataToCache));
+      console.log(`💾 Cached analysis med ${Math.round(ttl/3600)}t TTL (kvalitet: ${qualityScore}/10)`);
+    } catch (cacheError) {
+      console.log('⚠️ Cache write feilet:', cacheError.message);
+    }
+  }
+  
+  return result;
+}
+
+// Beregn kvalitetscore for intelligent caching
+function calculateQualityScore(result) {
+  let score = 5; // Base score
+  
+  // Boost for salgsoppgave-tekst
+  if (result.salgsoppgaveText?.length > 3000) score += 2;
+  else if (result.salgsoppgaveText?.length > 1000) score += 1;
+  
+  // Boost for strukturerte fakta
+  if (result.salgsoppgaveFakta && Object.keys(result.salgsoppgaveFakta).length > 3) score += 1;
+  
+  // Boost for AI-analyse
+  if (result.aiAnalysis) score += 1;
+  
+  // Boost for høy konfidens på BRA
+  if (result.salgsoppgaveFakta?._braMetadata?.confidence > 80) score += 1;
+  
+  return Math.min(10, Math.max(1, score));
+}
+
+async function getSalgsoppgaveAnalysisInternal(finnUrl) {
   console.log('🏠 Starter salgsoppgave-analyse for:', finnUrl);
   
   const browser = await puppeteer.launch({
@@ -2058,43 +2549,17 @@ async function getSalgsoppgaveAnalysis(finnUrl) {
       console.log('✅ Salgsoppgave-fakta ekstrahert:', salgsoppgaveFakta);
     }
     
-    // 5. Analyser med OpenAI hvis vi har tekst og API-nøkkel
+    // 5. **FORBEDRET OPENAI ANALYSE** med intelligent token-håndtering
     let analysis = null;
     
     if (salgsoppgaveText && salgsoppgaveText.length > 100) {
-      console.log('🤖 Sender til OpenAI for analyse...');
-      console.log('📊 Tekst lengde:', salgsoppgaveText.length, 'tegn');
+      console.log('🤖 Starter forbedret OpenAI-analyse...');
+      console.log('📊 Opprinnelig tekst lengde:', salgsoppgaveText.length, 'tegn');
+      console.log('📊 Strukturerte fakta:', Object.keys(salgsoppgaveFakta).length, 'felter');
       
       if (process.env.OPENAI_API_KEY) {
         try {
-          // Bygg utvidet prompt med strukturerte fakta
-          let strukturerteFakta = '';
-          if (Object.keys(salgsoppgaveFakta).length > 0) {
-            strukturerteFakta = `\n\n**STRUKTURERTE FAKTA EKSTRAHERT FRA SALGSOPPGAVE (prioriter denne informasjonen):**\n`;
-            for (const [key, value] of Object.entries(salgsoppgaveFakta)) {
-              strukturerteFakta += `- ${key}: ${value}\n`;
-            }
-            strukturerteFakta += `\n**VIKTIG:** Bruk disse strukturerte fakta som hovedkilde i din analyse.\n`;
-          }
-          
-          const fullPrompt = `Analyser denne salgsoppgaven:${strukturerteFakta}\n\n**FULL SALGSOPPGAVE-TEKST:**\n${salgsoppgaveText.substring(0, 10000)}`;
-          
-          const completion = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
-            messages: [
-              {
-                role: "system",
-                content: systemPrompt
-              },
-              {
-                role: "user", 
-                content: fullPrompt
-              }
-            ],
-            temperature: 0.3,
-            max_tokens: 2000
-          });
-          
+          const completion = await intelligentOpenAIAnalysis(salgsoppgaveText, salgsoppgaveFakta);
           const responseContent = completion.choices[0].message.content;
           
           try {
@@ -3300,8 +3765,8 @@ app.post("/api/analyse-salgsoppgave", async (req, res) => {
     
     console.log('🔍 Analyserer salgsoppgave for:', url);
     
-    // Få utvidet analyse med salgsoppgave
-    const result = await getSalgsoppgaveAnalysis(url);
+    // Få utvidet analyse med salgsoppgave (med intelligent caching)
+    const result = await getCachedOrAnalyzeSalgsoppgave(url);
     
     // Logg salgsoppgave-analyseresultat for debugging
     console.log('📊 SALGSOPPGAVE-ANALYSE RESULTAT:');
@@ -3425,7 +3890,7 @@ app.post("/api/full-analysis", async (req, res) => {
     });
     
     promises.push(basicScrapingPromise);
-    promises.push(getSalgsoppgaveAnalysis(url));
+    promises.push(getCachedOrAnalyzeSalgsoppgave(url));
     
     const [basicData, salgsoppgaveAnalysis] = await Promise.allSettled(promises);
     
@@ -3751,3 +4216,11 @@ app.post("/api/analyse-salgsoppgave-pdf", (req, res, next) => {
     });
   }
 });
+
+// Eksporter funksjoner for testing
+module.exports = {
+  extractBRAWithPriority,
+  calculateQualityScore,
+  estimateTokens,
+  compressRelevantContent
+};
