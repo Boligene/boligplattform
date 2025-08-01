@@ -202,7 +202,7 @@ const ViewModeSelector = ({ viewMode, onViewModeChange, isMobile }: {
   );
 };
 
-const SwipeableBoligCards = ({ boliger, alleKostnader }: { boliger: any[], alleKostnader: any[] }) => {
+const SwipeableBoligCards = ({ boliger }: { boliger: any[] }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   
   const nextBolig = () => {
@@ -237,7 +237,6 @@ const SwipeableBoligCards = ({ boliger, alleKostnader }: { boliger: any[], alleK
             const kostnader = kalkulerTotalKostnad(bolig);
             const pris = parseNumericValue(bolig.pris) || 0;
             const kvm = getValueOrDefault(bolig.bruksareal, 0); // Use 0 instead of DEFAULT_KVM for display
-            const prisPerKvm = kvm > 0 ? Math.round(pris / kvm) : 0;
             
             console.log('🏠 SwipeableBoligCards - parsed values:', {
               adresse: bolig.adresse,
@@ -594,7 +593,6 @@ export default function Sammenlign() {
               {viewMode === 'cards' && (
                 <SwipeableBoligCards 
                   boliger={sammenlignBoliger} 
-                  alleKostnader={alleKostnader} 
                 />
               )}
               {viewMode === 'calculator' && (
@@ -606,7 +604,6 @@ export default function Sammenlign() {
                     const kostnader = kalkulerTotalKostnad(bolig);
                     const pris = parseNumericValue(bolig.pris) || 0;
                     const kvm = getValueOrDefault(bolig.bruksareal, 0);
-                    const prisPerKvm = kvm > 0 ? Math.round(pris / kvm) : 0;
                     
                     console.log('📱 Mobile detailed view - parsed values:', {
                       adresse: bolig.adresse,

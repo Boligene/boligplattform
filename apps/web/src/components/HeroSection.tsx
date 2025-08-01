@@ -1,6 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useBolig } from '../context/BoligContext';
 import { ImportedBoligerSection } from './ImportedBoligerSection';
 
@@ -9,7 +9,7 @@ export const HeroSection: React.FC = () => {
   const [finnUrl, setFinnUrl] = useState("");
   const [feilmelding, setFeilmelding] = useState("");
   const [laster, setLaster] = useState(false);
-  const navigate = useNavigate();
+
 
   async function handleHentData(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();

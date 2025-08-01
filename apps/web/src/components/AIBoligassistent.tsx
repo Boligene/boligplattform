@@ -140,11 +140,7 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
     }
   };
 
-  // **NY FUNKSJON FOR Å OVERSKRIVE EKSISTERENDE ANALYSE**
-  const handleOverwriteAnalysis = () => {
-    setShowPDFUpload(true);
-    setPdfUploadError('');
-  };
+
 
   const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -279,28 +275,7 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
     return <XCircle className="w-5 h-5 text-red-600" />;
   };
 
-  const getTextQualityInfo = (textAnalysis: any) => {
-    if (!textAnalysis) return null;
-    
-    const qualityColors: Record<string, string> = {
-      'høy': 'text-green-600 bg-green-50 border-green-200',
-      'medium': 'text-yellow-600 bg-yellow-50 border-yellow-200', 
-      'lav': 'text-orange-600 bg-orange-50 border-orange-200',
-      'svært lav': 'text-red-600 bg-red-50 border-red-200',
-      'ingen': 'text-gray-600 bg-gray-50 border-gray-200'
-    };
-    
-    const quality = textAnalysis.quality || 'ukjent';
-    const colorClass = qualityColors[quality] || 'text-gray-600 bg-gray-50 border-gray-200';
-    
-    return {
-      quality,
-      colorClass,
-      textLength: textAnalysis.textLength || 0,
-      needsPDFUpload: textAnalysis.needsPDFUpload || false,
-      userFriendlyMessage: textAnalysis.userFriendlyMessage
-    };
-  };
+
 
   return (
     <div className="space-y-8">
