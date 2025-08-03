@@ -19,37 +19,44 @@ const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
 
-// **REDIS CACHING SETUP** - Intelligent cache med fallback
+// **INTELLIGENT REDIS CACHING SETUP** - Miljø-basert konfigurasjon
 let redis = null;
-try {
-  const Redis = require('ioredis');
-  redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-    maxRetriesPerRequest: 1,
-    lazyConnect: true,
-    showFriendlyErrorStack: true,
-    connectTimeout: 5000,
-    retryDelayOnFailover: 100
-  });
-  
-  redis.on('connect', () => {
-    console.log('✅ Redis tilkoblet - caching aktivert');
-  });
-  
-  redis.on('error', (err) => {
-    console.log('⚠️ Redis tilkobling feilet:', err.message);
-    console.log('💾 Fortsetter uten cache-funksjonalitet');
-    redis = null; // Disable caching hvis Redis ikke virker
-  });
-  
-  redis.on('close', () => {
-    console.log('📴 Redis tilkobling lukket');
-  });
-} catch (error) {
-  console.log('⚠️ Redis ikke tilgjengelig:', error.message);
-  console.log('💾 Fortsetter uten cache-funksjonalitet');
+
+const shouldUseRedis = process.env.NODE_ENV === 'production' || 
+                      process.env.NODE_ENV === 'staging' ||
+                      process.env.REDIS_FORCE_ENABLE === 'true';
+
+if (shouldUseRedis) {
+  try {
+    const Redis = require('ioredis');
+    redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+      maxRetriesPerRequest: 0, // Unngå spam i logs
+      lazyConnect: true,
+      showFriendlyErrorStack: false, // Mindre verbose logging
+      connectTimeout: 3000,
+      retryDelayOnFailover: 100
+    });
+    
+    redis.on('connect', () => {
+      console.log('✅ Redis tilkoblet - intelligent caching aktivert');
+    });
+    
+    redis.on('error', (err) => {
+      console.log('⚠️ Redis feilet (produksjon):', err.message);
+      redis = null; // Fallback gracefully
+    });
+    
+  } catch (error) {
+    console.log('⚠️ Redis konfigurasjon feilet:', error.message);
+    redis = null;
+  }
+} else {
+  console.log('💾 Redis deaktivert i development-modus (aktiveres i produksjon)');
 }
 
 const app = express();
+
+// **STABIL EXPRESS v4 MIDDLEWARE** - Tilbake til velprøvd konfigurasjon
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
