@@ -77,12 +77,17 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
       
       // **FORBEDRET KOMBINERINGSSTRATEGI**
       if (analysis) {
-        // Kombiner PDF-analyse med eksisterende scraping-data
+        // **FORBEDRET KOMBINERT ANALYSE** med korrekt datastruktur-mapping
+        console.log('🔀 Kombinerer PDF-resultat med eksisterende scraping-data');
+        
         const combinedAnalysis = {
           ...analysis,
-          // Overstyr salgsoppgave-delen med PDF-resultatet (høyere prioritet)
+          // **KRITISK**: Overstyr salgsoppgave-delen med PDF-resultatet (høyere prioritet)
           salgsoppgaveAnalyse: {
             ...pdfResult,
+            // **VIKTIG**: Sørg for at PDF-analyse er tilgjengelig for mapEnhancedAnalysisToDisplay
+            analysis: pdfResult.analysis, // Det parsede JSON-objektet
+            success: true, // Marker som vellykket
             _isManualUpload: true,
             _uploadTimestamp: new Date().toISOString(),
             _originalFileName: file.name
@@ -96,14 +101,24 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
           }
         };
         
+        console.log('✅ Kombinert analyse opprettet:', {
+          hasPDFAnalysis: !!combinedAnalysis.salgsoppgaveAnalyse.analysis,
+          hasScrapingData: !!(combinedAnalysis._dataSources.scrapingData)
+        });
+        
         console.log('🔄 Kombinerer PDF-analyse med eksisterende scraping-data');
         setAnalysis(combinedAnalysis);
         setDataSource('combined');
       } else {
-        // Hvis vi ikke har eksisterende analyse, opprett ny basert kun på PDF
+        // **KRITISK FIX**: PDF-only analyse med korrekt datastruktur-mapping
+        console.log('🔄 Mapper PDF-resultat for visuelle komponenter:', pdfResult);
+        
         const pdfOnlyAnalysis = {
           salgsoppgaveAnalyse: {
             ...pdfResult,
+            // **VIKTIG**: Sørg for at 'analysis' er tilgjengelig for mapEnhancedAnalysisToDisplay
+            analysis: pdfResult.analysis, // Det parsede JSON-objektet fra backend
+            success: true, // Marker som vellykket for å aktivere visuelle komponenter
             _isManualUpload: true,
             _uploadTimestamp: new Date().toISOString(),
             _originalFileName: file.name
@@ -112,10 +127,27 @@ export const AIBoligassistent: React.FC<AIBoligassistentProps> = ({
             primary: 'manual_pdf_only',
             manualPDFData: pdfResult
           },
-          // Generer en grunnleggende score basert på PDF-analysen
-          score: pdfResult.analysis?.score || 75,
-          sammendrag: pdfResult.analysis?.sammendrag || 'Analyse basert på opplastet salgsoppgave-PDF'
+          // **INTELLIGENT SCORE-EKSTRAKSJON**
+          score: (
+            pdfResult.analysis?.score || 
+            (pdfResult.analysis?.tekniskTilstand?.score ? pdfResult.analysis.tekniskTilstand.score * 10 : null) ||
+            (pdfResult.analysis?.prisvurdering?.score ? pdfResult.analysis.prisvurdering.score * 10 : null) ||
+            75
+          ),
+          // **INTELLIGENT SAMMENDRAG-EKSTRAKSJON** 
+          sammendrag: (
+            pdfResult.analysis?.konklusjon ||
+            pdfResult.analysis?.sammendrag ||
+            pdfResult.analysis?.tekniskTilstand?.sammendrag ||
+            'Analyse basert på opplastet salgsoppgave-PDF'
+          )
         };
+        
+        console.log('✅ PDF-analyse mappet for visning:', {
+          hasAnalysis: !!pdfOnlyAnalysis.salgsoppgaveAnalyse.analysis,
+          score: pdfOnlyAnalysis.score,
+          sammendragLength: pdfOnlyAnalysis.sammendrag.length
+        });
         
         setAnalysis(pdfOnlyAnalysis);
         setDataSource('manual_pdf');

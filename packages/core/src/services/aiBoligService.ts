@@ -399,13 +399,94 @@ export class AIBoligService {
     };
   }
 
-  // Ekte OpenAI API analyse
-  private static async realOpenAIAnalyse(data: BoligScrapingData): Promise<BoligAnalyse> {
-    console.log('Starting real OpenAI analysis with data:', data);
-    
-    const prompt = `
-Du er en ekspert norsk eiendomsmegler og boliganalytiker. Analyser denne boligen fra Finn.no og gi en detaljert, realistisk vurdering basert på all tilgjengelig informasjon.
+  // **INTELLIGENTE HJELPEFUNKSJONER FOR AVANSERT AI-ANALYSE**
 
+  private static estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4); // Grov estimering
+  }
+
+  private static compressRelevantContent(text: string): string {
+    const sections = {
+      prisInfo: [] as string[],
+      boligDetaljer: [] as string[],
+      beliggenhet: [] as string[],
+      teknisk: [] as string[],
+      okonomi: [] as string[]
+    };
+
+    const lines = text.split('\n');
+    
+    for (const line of lines) {
+      const lower = line.toLowerCase();
+      if (lower.includes('pris') || lower.includes('kr') || lower.includes('kostnad')) {
+        sections.prisInfo.push(line.trim());
+      } else if (lower.includes('kvm') || lower.includes('m²') || lower.includes('rom') || lower.includes('bad')) {
+        sections.boligDetaljer.push(line.trim());
+      } else if (lower.includes('beliggenhet') || lower.includes('adresse') || lower.includes('transport')) {
+        sections.beliggenhet.push(line.trim());
+      } else if (lower.includes('energi') || lower.includes('oppvarming') || lower.includes('isolering')) {
+        sections.teknisk.push(line.trim());
+      } else if (lower.includes('avgift') || lower.includes('kostnader') || lower.includes('skatt')) {
+        sections.okonomi.push(line.trim());
+      }
+    }
+
+    let result = '';
+    for (const [category, items] of Object.entries(sections)) {
+      if (items.length > 0) {
+        result += `\n**${category.toUpperCase()}:**\n${items.slice(0, 10).join('\n')}\n`;
+      }
+    }
+    
+    return result || text.substring(0, 8000);
+  }
+
+  private static buildDynamicSystemPrompt(boligData: BoligScrapingData): string {
+    let prompt = `Du er en profesjonell norsk eiendomsmegler med 20 års erfaring. Du analyserer boligdata og gir objektive, realistiske vurderinger basert på norske markedsforhold.\n\n`;
+    
+    // Legg til spesifikk kontekst basert på tilgjengelige data
+    if (boligData.adresse) {
+      prompt += `Eiendommen ligger på ${boligData.adresse}. Vurder områdets kvaliteter og markedsposisjon.\n`;
+    }
+    
+    if (boligData.pris) {
+      prompt += `Prisantydning er ${boligData.pris}. Vurder pris-kvalitet forholdet kritisk.\n`;
+    }
+    
+    if (boligData.energimerking) {
+      prompt += `Energimerking er ${boligData.energimerking}. Ta hensyn til dette i din vurdering av fremtidige kostnader.\n`;
+    }
+    
+    prompt += `\nGi en REALISTISK og GRUNDIG analyse. Vær kritisk der det trengs. Svar kun med gyldig JSON i dette formatet:\n{\n  "score": [1-100],\n  "the_good": ["positive punkt 1", "positive punkt 2", ...],\n  "the_bad": ["bekymring 1", "bekymring 2", ...],\n  "the_ugly": ["alvorlig problem 1", ...] (eller tom array),\n  "sammendrag": "detaljert sammendrag på norsk"\n}`;
+    
+    return prompt;
+  }
+
+  private static truncateIntelligently(text: string, maxTokens: number): string {
+    const estimatedTokens = this.estimateTokens(text);
+    
+    if (estimatedTokens <= maxTokens) {
+      return text;
+    }
+    
+    const targetLength = Math.floor(text.length * (maxTokens / estimatedTokens));
+    
+    // Prøv å kutere på naturlige steder
+    const truncated = text.substring(0, targetLength);
+    const lastPeriod = truncated.lastIndexOf('.');
+    const lastNewline = truncated.lastIndexOf('\n');
+    
+    const cutPoint = Math.max(lastPeriod, lastNewline);
+    
+    return cutPoint > targetLength * 0.8 ? truncated.substring(0, cutPoint + 1) : truncated;
+  }
+
+  // Ekte OpenAI API analyse (FULLSTENDIG OPPGRADERT MED INTELLIGENTE FUNKSJONER)
+  private static async realOpenAIAnalyse(data: BoligScrapingData): Promise<BoligAnalyse> {
+    console.log('🤖 Starting advanced OpenAI analysis with intelligent optimization...');
+    
+    // FASE 1: Bygg datakilde-tekst
+    const dataText = `
 GRUNNLEGGENDE INFO:
 URL: ${data.url}
 Adresse: ${data.adresse}
@@ -454,32 +535,23 @@ Visningsdato: ${data.visningsdato || 'Ikke oppgitt'}
 Budfrister: ${data.budfrister || 'Ikke oppgitt'}
 
 TILLEGGSDATA:
-${data.keyValueData ? Object.entries(data.keyValueData).map(([key, value]) => `${key}: ${value}`).join('\n') : 'Ingen tilleggsdata'}
+${data.keyValueData ? Object.entries(data.keyValueData).map(([key, value]) => `${key}: ${value}`).join('\n') : 'Ingen tilleggsdata'}`;
 
-VIKTIG: Gi en REALISTISK og GRUNDIG analyse basert på faktiske norske boligmarkedsforhold. Vurder prisen mot markedet, ikke bare si "god standard". Vær kritisk og objektiv. Bruk all tilgjengelig informasjon.
-
-Gi din analyse i følgende JSON-format:
-{
-  "score": [poengsum 1-100 basert på helhetsvurdering],
-  "the_good": [array med 4-6 konkrete positive punkter],
-  "the_bad": [array med 3-5 konkrete negative punkter eller bekymringer],
-  "the_ugly": [array med 0-3 alvorlige problemer, eller tom array hvis ingen],
-  "sammendrag": "[detaljert sammendrag på norsk, 3-4 setninger med konkrete vurderinger og anbefaling]"
-}
-
-Vurder spesielt:
-- Pris-kvalitet forhold for området og boligtypen
-- Energimerking og hva det betyr for fremtidige kostnader
-- Felleskostnader, avgifter og økonomiske forhold
-- Praktiske fasiliteter og deres verdi
-- Beliggenhet og infrastruktur
-- Fremtidig verdipotensial og risikofaktorer
-- Eventuelle røde flagg eller bekymringer
-
-Vær spesifikk, realistisk og bruk konkrete tall der det er relevant. Svar kun med gyldig JSON.`;
+    // FASE 2: Intelligent komprimering og token-optimalisering
+    const compressedContent = this.compressRelevantContent(dataText);
+    const systemPrompt = this.buildDynamicSystemPrompt(data);
+    
+    // FASE 3: Token-budsjett og intelligent trunkering
+    const maxTokens = 15000; // gpt-4o-mini kan håndtere mer
+    const promptTokens = this.estimateTokens(systemPrompt);
+    const availableForContent = maxTokens - promptTokens - 1500; // Buffer for respons
+    
+    const optimizedContent = this.truncateIntelligently(compressedContent, availableForContent);
+    
+    console.log(`🤖 Token-optimalisering: ${promptTokens} system + ${this.estimateTokens(optimizedContent)} innhold = ${promptTokens + this.estimateTokens(optimizedContent)} totalt`);
 
     try {
-      console.log('Making OpenAI API request...');
+      console.log('🚀 Making advanced OpenAI API request with gpt-4o-mini...');
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -487,19 +559,20 @@ Vær spesifikk, realistisk og bruk konkrete tall der det er relevant. Svar kun m
           'Authorization': `Bearer ${this.API_KEY}`,
         },
         body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
+          model: 'gpt-4o-mini', // OPPGRADERT: Bedre og billigere modell
           messages: [
             {
               role: 'system',
-              content: 'Du er en profesjonell norsk eiendomsmegler med 20 års erfaring. Du kjenner det norske boligmarkedet godt og gir alltid ærlige, objektive vurderinger. Du er ikke redd for å påpeke negative sider ved en bolig hvis de finnes.'
+              content: systemPrompt // OPPGRADERT: Dynamisk prompt
             },
             {
               role: 'user',
-              content: prompt
+              content: optimizedContent // OPPGRADERT: Intelligent komprimering
             }
           ],
-          max_tokens: 1200,
-          temperature: 0.8,
+          max_tokens: 1500,      // OPPGRADERT: Mer plass for detaljert analyse
+          temperature: 0.3,      // OPPGRADERT: Mer deterministisk
+          response_format: { type: "json_object" } // OPPGRADERT: Garantert JSON-respons
         }),
       });
 
@@ -517,9 +590,21 @@ Vær spesifikk, realistisk og bruk konkrete tall der det er relevant. Svar kun m
       const analysisText = result.choices[0].message.content;
       console.log('Analysis text from OpenAI:', analysisText);
       
-      // Parse JSON response
-      const analysis = JSON.parse(analysisText);
-      console.log('Parsed analysis:', analysis);
+      // OPPGRADERT: Robust JSON parsing med fallback
+      let analysis;
+      try {
+        analysis = JSON.parse(analysisText);
+        console.log('✅ JSON parsed successfully:', analysis);
+      } catch (parseError) {
+        console.error('❌ JSON parsing failed, trying to extract JSON:', parseError);
+        const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          analysis = JSON.parse(jsonMatch[0]);
+          console.log('✅ JSON extracted and parsed successfully');
+        } else {
+          throw new Error('Could not extract valid JSON from OpenAI response');
+        }
+      }
       
       return {
         id: this.generateId(),
@@ -814,7 +899,11 @@ GI ALLTID EKSAKTE SVAR basert på informasjonen. Hvis brukeren spør "hvor stort
         { role: 'user', content: userMessage }
       ];
 
-      console.log('Sending chat request to OpenAI...');
+      // OPPGRADERT: Token-optimalisering for chat
+      const totalTokens = this.estimateTokens(JSON.stringify(messages));
+      console.log(`💬 Token-bruk for chat: ca. ${totalTokens} tokens`);
+      
+      console.log('🚀 Sending advanced chat request to OpenAI with gpt-4o-mini...');
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -822,10 +911,10 @@ GI ALLTID EKSAKTE SVAR basert på informasjonen. Hvis brukeren spør "hvor stort
           'Authorization': `Bearer ${this.API_KEY}`,
         },
         body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
+          model: 'gpt-4o-mini', // OPPGRADERT: Bedre og billigere modell
           messages: messages,
-          max_tokens: 1000, // Økt fra 300 til 1000 for å håndtere mer detaljerte svar
-          temperature: 0.7,
+          max_tokens: 1200,     // OPPGRADERT: Litt mer plass for detaljerte svar
+          temperature: 0.4,     // OPPGRADERT: Litt mer deterministisk for chat
         }),
       });
 

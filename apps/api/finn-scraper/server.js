@@ -66,55 +66,10 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// System prompt for salgsoppgave analyse
-const systemPrompt = `
-Du er en norsk boligekspert og eiendomsmegler med lang erfaring. Du får en full salgsoppgave fra Finn.no/DNB/andre kilder.
-
-**VIKTIG:** Du vil få både strukturerte fakta og full tekst fra salgsoppgaven. PRIORITER ALLTID de strukturerte faktaene som er ekstrahert direkte fra salgsoppgaven - disse er mest nøyaktige.
-
-Analyser informasjonen grundig og gi en profesjonell vurdering på:
-
-1. TEKNISK TILSTAND: Vurder bygningens tekniske standard, vedlikeholdsbehov, installasoner (VVS, elektro, etc.)
-2. RISIKOFAKTORER: Identifiser potensielle problemer, fremtidige kostnader, juridiske forhold
-3. PRISVURDERING: Sammenlign med markedet, vurder pris per m², markedsposisjon
-4. OPPUSSINGSBEHOV: Identifiser nødvendige og ønskede oppgraderinger med estimerte kostnader
-5. ANBEFALTE SPØRSMÅL: Viktige spørsmål å stille under visning eller til megler
-
-Gi svaret som strukturert JSON med disse feltene:
-{
-  "tekniskTilstand": {
-    "score": 1-10,
-    "sammendrag": "kort sammendrag",
-    "detaljer": "detaljert analyse",
-    "hovedFunn": ["liste", "med", "hovedpunkter"]
-  },
-  "risiko": {
-    "score": 1-10,
-    "sammendrag": "kort sammendrag", 
-    "risikoer": ["liste", "med", "risikoer"],
-    "anbefalinger": ["liste", "med", "anbefalinger"]
-  },
-  "prisvurdering": {
-    "score": 1-10,
-    "sammendrag": "kort sammendrag",
-    "prisPerM2Vurdering": "analyse av pris per m²",
-    "markedsvurdering": "sammenligning med markedet"
-  },
-  "oppussingBehov": {
-    "nodvendig": ["liste", "med", "nødvendige", "tiltak"],
-    "onsket": ["liste", "med", "ønskede", "oppgraderinger"],
-    "estimertKostnad": "estimat på totalkostnader"
-  },
-  "anbefalteSporsmal": [
-    "Viktige spørsmål til visning",
-    "Spørsmål om teknisk tilstand",
-    "Spørsmål om økonomi og vedlikehold"
-  ],
-  "konklusjon": "samlet vurdering og anbefaling"
-}
-
-Vær kritisk og realistisk i vurderingene. Base deg på norske forhold og standarder.
-`;
+// **SYSTEM PROMPTS BRUKER NÅ DYNAMISK GENERERING**
+// Alle OpenAI-kall bruker nå buildDynamicSystemPrompt() for å generere
+// skreddersydde prompts basert på tilgjengelige data.
+// Dette gir bedre resultater enn statiske prompts.
 
 // Hjelpefunksjon for å hente tekst fra element med fallback
 async function safeGetText(page, selectors, fallback = '') {
@@ -1186,34 +1141,48 @@ function extractBRAWithPriority(salgsoppgaveText) {
 
   const arealCandidates = [];
   
-  // FASE 1: Definer søkemønstre med prioritetspoeng
+  // FASE 1: Definer søkemønstre med prioritetspoeng (FORBEDRET FORMATSTØTTE)
   const patterns = [
     // Høyest prioritet - eksakte BRA-betegnelser
-    { regex: /(?:^|\n)\s*(?:bruksareal|^bra)[\s\n]*:?\s*(\d{1,4})\s*(?:m²|m2|kvm)?/gi, priority: 100, label: 'bruksareal' },
-    { regex: /(?:^|\n)\s*(?:primærareal|p-rom)[\s\n]*:?\s*(\d{1,4})\s*(?:m²|m2|kvm)?/gi, priority: 90, label: 'primærareal' },
+    { regex: /(?:^|\n|\r)\s*(?:bruksareal|bra(?!-[ie]))\s*[:\-.]?\s*(\d{1,4})\s*(?:m²|m2|kvm|kvadratmeter)?/gi, priority: 100, label: 'bruksareal' },
+    { regex: /(?:^|\n|\r)\s*(?:primærareal|primær.?areal|p-rom)\s*[:\-.]?\s*(\d{1,4})\s*(?:m²|m2|kvm|kvadratmeter)?/gi, priority: 90, label: 'primærareal' },
     
     // Medium prioritet - mer spesifikke mønstre
-    { regex: /boligen\s+(?:har|er)(?:\s+på)?\s*(\d{1,4})\s*(?:m²|m2|kvm)/gi, priority: 70, label: 'boligstørrelse' },
-    { regex: /(\d{1,4})\s*(?:m²|m2|kvm)\s+(?:bruksareal|bra|bolig)/gi, priority: 80, label: 'bruksareal_omvendt' },
+    { regex: /boligen\s+(?:har|er|måler)(?:\s+på)?\s*(\d{1,4})\s*(?:m²|m2|kvm|kvadratmeter)/gi, priority: 70, label: 'boligstørrelse' },
+    { regex: /(\d{1,4})\s*(?:m²|m2|kvm|kvadratmeter)\s+(?:bruksareal|bra(?!-[ie])|bolig)/gi, priority: 80, label: 'bruksareal_omvendt' },
     
     // Lavest prioritet - generelle areal-mønstre  
-    { regex: /(?:^|\n)\s*(?:areal|størrelse)[\s\n]*:?\s*(\d{1,4})\s*(?:m²|m2|kvm)/gi, priority: 50, label: 'generelt_areal' },
+    { regex: /(?:^|\n|\r)\s*(?:areal|størrelse|totalareal)\s*[:\-.]?\s*(\d{1,4})\s*(?:m²|m2|kvm|kvadratmeter)/gi, priority: 50, label: 'generelt_areal' },
   ];
   
-  // FASE 2: Filtrer ut uønskede mønstre FØRST
+  // FASE 2: Filtrer ut uønskede mønstre FØRST (FORBEDRET)
   const excludePatterns = [
-    /(?:internt|eksternt|bra-[ie]|utvendig|takterrasse|balkong|terrasse|garasje|kjeller(?!.*bra)|loft(?!.*bra)|tomt)/i
+    /(?:bra-[ie]|internt|eksternt|intern|ekstern|utvendig|takterrasse|balkong|terrasse|garasje|kjeller(?!.*bra)|loft(?!.*bra)|tomt|carport)/i
   ];
   
-  // FASE 3: Samle alle kandidater
+  // Ekspander kontekst for bedre filtrering
+  const getExpandedContext = (fullText, matchStart, matchLength) => {
+    const contextLength = 50;
+    const start = Math.max(0, matchStart - contextLength);
+    const end = Math.min(fullText.length, matchStart + matchLength + contextLength);
+    return fullText.substring(start, end);
+  };
+  
+  // FASE 3: Samle alle kandidater (FORBEDRET FILTRERING)
   patterns.forEach(({ regex, priority, label }) => {
     let match;
     while ((match = regex.exec(salgsoppgaveText)) !== null) {
       const fullMatch = match[0];
       const value = parseInt(match[1], 10);
       
-      // Hopp over hvis matcher ekskluderte mønstre
-      if (excludePatterns.some(exclude => exclude.test(fullMatch))) {
+      // **FORBEDRET INTELLIGENT EKSKLUDERING**: 
+      // Kun ekskluder hvis selve MATCH-en inneholder uønskede ord, ikke konteksten
+      const isDirectExclusion = excludePatterns.some(exclude => exclude.test(fullMatch));
+      
+      // Spesiell sjekk for intern/ekstern BRA som BRA-I, BRA-E
+      const isInternalExternal = /bra-[ie]|intern\s+(?:bruksareal|bra)|ekstern\s+(?:bruksareal|bra)/i.test(fullMatch);
+      
+      if (isDirectExclusion || isInternalExternal) {
         console.log(`❌ Ekskludert: "${fullMatch.trim()}" (uønsket type)`);
         continue;
       }
@@ -3730,16 +3699,27 @@ app.post("/api/analyse-takst", (req, res, next) => {
       return res.json(dummyResult);
     }
     const openai = new OpenAI({ apiKey: openaiApiKey });
-    const prompt = `Du er en erfaren norsk boligrådgiver og takstekspert. Du skal analysere innholdet i en takstrapport fra en bolig (rapporten er limt inn under). Oppsummer de viktigste punktene og gi brukeren en tydelig og informativ rapport.\n\n**Oppgaven din:**\n- Gå gjennom teksten og hent ut de viktigste forholdene, avvikene og eventuelle risikoer.\n- Fremhev spesielt alle funn med tilstandsgrad 2 eller 3 (TG2/TG3), avvik, feil eller ting som kan koste penger å utbedre.\n- Lag en punktliste med maks 10 avvik og anbefalte tiltak. Hver avvik skal ha et felt 'tg' med verdien 'TG2' eller 'TG3' (ikke bare tall).\n- Gi et utfyllende sammendrag (det kan være langt) og en grundig risikovurdering.\n- Bruk et enkelt og forståelig språk (ingen faguttrykk).\n- Er du usikker, informer om at rapporten ikke er komplett og anbefal brukeren å lese hele takstrapporten selv.\n\nSvar alltid i gyldig, komplett JSON (ingen trailing commas, ingen kommentarer, ingen avbrutte arrays/objekter) med feltene: sammendrag, avvik (array med beskrivelse og tg), risiko, forslagTittel.\n\nHer er rapporten:\n${tekst}`;
+    // **OPPGRADERT: Intelligent tekst-optimalisering for takstrapport**
+    const compressedText = compressRelevantContent(tekst);
+    const availableTokens = 12000; // Buffer for respons
+    const optimizedText = truncateIntelligently(compressedText, availableTokens);
+    
+    console.log(`📊 Takstrapport token-optimalisering: ${tekst.length} → ${optimizedText.length} tegn`);
+    
+    const prompt = `Du er en erfaren norsk boligrådgiver og takstekspert. Du skal analysere innholdet i en takstrapport fra en bolig (rapporten er limt inn under). Oppsummer de viktigste punktene og gi brukeren en tydelig og informativ rapport.\n\n**Oppgaven din:**\n- Gå gjennom teksten og hent ut de viktigste forholdene, avvikene og eventuelle risikoer.\n- Fremhev spesielt alle funn med tilstandsgrad 2 eller 3 (TG2/TG3), avvik, feil eller ting som kan koste penger å utbedre.\n- Lag en punktliste med maks 10 avvik og anbefalte tiltak. Hver avvik skal ha et felt 'tg' med verdien 'TG2' eller 'TG3' (ikke bare tall).\n- Gi et utfyllende sammendrag (det kan være langt) og en grundig risikovurdering.\n- Bruk et enkelt og forståelig språk (ingen faguttrykk).\n- Er du usikker, informer om at rapporten ikke er komplett og anbefal brukeren å lese hele takstrapporten selv.\n\nSvar alltid i gyldig, komplett JSON (ingen trailing commas, ingen kommentarer, ingen avbrutte arrays/objekter) med feltene: sammendrag, avvik (array med beskrivelse og tg), risiko, forslagTittel.\n\nHer er rapporten:\n${optimizedText}`;
+    // **OPPGRADERT: Konsistent med andre endpunkter**
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini", // HARMONISERT: Samme modell som andre endpunkter
       messages: [
-        { role: "system", content: "Du er en hjelpsom boligekspert." },
+        { role: "system", content: "Du er en erfaren norsk boligrådgiver og takstekspert med spesialkompetanse i å tolke tilstandsrapporter. Du gir alltid klare, objektive vurderinger basert på norske standarder." }, // FORBEDRET: Mer spesifikt system prompt
         { role: "user", content: prompt }
       ],
       temperature: 0.2,
-      max_tokens: 1200
+      max_tokens: 1500,  // OPPGRADERT: Mer plass for detaljert analyse
+      response_format: { type: "json_object" } // OPPGRADERT: Garantert JSON-respons
     });
+    
+    console.log('✅ Takstrapport analysert med oppgradert gpt-4o-mini og strukturert respons');
     // Finn JSON i svaret
     let jsonString = completion.choices[0].message.content.match(/\{[\s\S]*\}/)?.[0];
     if (!jsonString) {
@@ -4082,8 +4062,31 @@ app.post("/api/analyse-salgsoppgave-pdf", (req, res, next) => {
       
       try {
         // Bruk den nye intelligente OpenAI-analyse funksjonen
-        analysis = await intelligentOpenAIAnalysis(tekst, salgsoppgaveFakta);
-        console.log('✅ Forbedret OpenAI PDF-analyse fullført med gpt-4o-mini og strukturert respons');
+        const openaiResult = await intelligentOpenAIAnalysis(tekst, salgsoppgaveFakta);
+        
+        // **KRITISK FIX**: Parse JSON fra OpenAI completion til strukturert objekt
+        const analysisContent = openaiResult.choices[0].message.content;
+        try {
+          analysis = JSON.parse(analysisContent);
+          console.log('✅ Forbedret OpenAI PDF-analyse fullført og JSON parsset korrekt');
+        } catch (parseError) {
+          console.error('❌ Kunne ikke parse JSON fra OpenAI:', parseError);
+          console.log('🔄 Prøver å finne JSON i respons...');
+          
+          // Prøv å finne JSON innenfor teksten
+          const jsonMatch = analysisContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            analysis = JSON.parse(jsonMatch[0]);
+            console.log('✅ JSON funnet og parsset fra OpenAI respons');
+          } else {
+            analysis = {
+              konklusjon: analysisContent,
+              _parseError: true,
+              _originalResponse: analysisContent
+            };
+            console.log('⚠️ Fallback: bruker rå respons som konklusjon');
+          }
+        }
         
       } catch (openaiError) {
         console.error('❌ OpenAI API feil ved PDF-analyse:', openaiError);
@@ -4157,7 +4160,7 @@ app.post("/api/analyse-salgsoppgave-pdf", (req, res, next) => {
       textAnalysis: textAnalysis,
       textLength: tekst.length,
       
-      // **AI-ANALYSE**
+      // **AI-ANALYSE** (nå korrekt parsset JSON)
       analysis: analysis,
       
       // **HOVEDDATA FRA SALGSOPPGAVE**

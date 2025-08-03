@@ -27,16 +27,46 @@ export const AIBoligWidget: React.FC<AIBoligWidgetProps> = ({ className = '' }) 
     setLoading(true);
     try {
       const analysis = await AIBoligService.analyseMedSalgsoppgave(finnUrl);
+      console.log('🔍 Widget mottok analyse:', analysis);
+
+      // **INTELLIGENT DATAEKSTRAKSJON** for å håndtere oppgraderte API-responser
+      const extractScore = () => {
+        // Prøv ny struktur først, deretter fallback til gammel
+        if (analysis.salgsoppgaveAnalyse?.analysis?.tekniskTilstand?.score) {
+          return analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.score * 10; // Skaler fra 1-10 til 1-100
+        }
+        if (analysis.salgsoppgaveAnalyse?.analysis?.prisvurdering?.score) {
+          return analysis.salgsoppgaveAnalyse.analysis.prisvurdering.score * 10;
+        }
+        return analysis.score || 75; // Fallback
+      };
+      
+      const extractSummary = () => {
+        // Prøv ny struktur først, deretter fallback til gammel
+        if (analysis.salgsoppgaveAnalyse?.analysis?.konklusjon) {
+          return analysis.salgsoppgaveAnalyse.analysis.konklusjon.substring(0, 150) + '...';
+        }
+        if (analysis.salgsoppgaveAnalyse?.analysis?.tekniskTilstand?.sammendrag) {
+          return analysis.salgsoppgaveAnalyse.analysis.tekniskTilstand.sammendrag.substring(0, 150) + '...';
+        }
+        return (analysis.sammendrag || 'Analyse fullført').substring(0, 150) + '...';
+      };
 
       setQuickAnalysis({
-        score: analysis.score,
-        summary: analysis.sammendrag.substring(0, 150) + '...',
+        score: extractScore(),
+        summary: extractSummary(),
         adresse: analysis.scraping_data?.adresse,
         pris: analysis.scraping_data?.pris,
         type: analysis.scraping_data?.type,
         textAnalysis: analysis.textAnalysis,
         needsPDFUpload: analysis.needsPDFUpload,
         userFriendlyMessage: analysis.userFriendlyMessage
+      });
+      
+      console.log('✅ Widget analyse ekstrahert:', {
+        score: extractScore(),
+        summaryLength: extractSummary().length,
+        hasEnhancedData: !!analysis.salgsoppgaveAnalyse?.analysis
       });
     } catch (error) {
       console.error('Quick analysis error:', error);
